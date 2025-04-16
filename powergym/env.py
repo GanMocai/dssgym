@@ -478,7 +478,7 @@ class Env(gym.Env):
             # Penalty for power loss of entire system at one time step
             loss = self.env.circuit.total_loss()[0]  # a postivie float
             gen = self.env.circuit.total_power()[0]  # a negative float
-            ratio = max(0.0, min(1.0, self.env.obs['power_loss']))
+            ratio = max(0.0, min(1.0, self.env.obs['power_loss']))  # 功率损耗和总功率的比值
             return -ratio * self.power_w
 
         def ctrl_reward(self, capdiff, regdiff, soc_err, discharge_err):
@@ -493,6 +493,10 @@ class Env(gym.Env):
                    (0.0 if self.env.t != self.env.horizon else self.soc_w * sum(soc_err)) + \
                    self.dis_w * sum(discharge_err)
             return -cost
+
+        def completion_reward(self):
+            # 完成率奖励时间步
+            return max(0.0, self.env.obs['com']) * self.com_w
 
         def voltage_reward(self, record_node=False):
             # Penalty for node voltage being out of [0.95, 1.05] range
@@ -586,7 +590,7 @@ class Env(gym.Env):
         self.obs['cap_statuses'] = cap_statuses
         self.obs['reg_statuses'] = reg_statuses
         self.obs['bat_statuses'] = bat_statuses
-        self.obs['power_loss'] = - self.circuit.total_loss()[0] / self.circuit.total_power()[0]
+        self.obs['power_loss'] = - self.circuit.total_loss()[0] / self.circuit.total_power()[0]  # 功率损耗和总功率的比值
         self.obs['time'] = self.t
         if self.observe_load:
             self.obs['load_profile_t'] = self.all_load_profiles.iloc[self.t % self.horizon].to_dict()  # 截取负载曲线包括在obs中
