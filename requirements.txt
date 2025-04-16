@@ -1,0 +1,10 @@
+dss_python==0.15.7
+dss_python_backend==0.14.5
+gymnasium==0.29.1
+imageio==2.37.0
+matplotlib==3.9.2
+networkx==3.2.1
+numpy==1.26.4
+pandas==2.2.1
+python==3.11.8
+stable-baselines3==2.3.2
