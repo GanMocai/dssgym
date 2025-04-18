@@ -1563,13 +1563,12 @@ class BatteryStationManager:
         self.sorted_indices = np.argsort(arrival)
 
         # 性能统计
-        # 性能统计
         self.stats = {
             # 基本连接统计
-            'connected_count': 0,  # 已连接过的EV数，在断开时计数
-            'rejected_count': 0,  # 未能连接的EV数
-            'waiting_count': 0,  # 进入等待队列的电池数
-            'active_count': 0,  # 当前连接的电池数
+            'connected_count': 0,  # 已连接的EV电池数【原本计划用于统计已连接过的EV数，在断开时计数】
+            'rejected_count': 0,  # 未能连接的EV电池数
+            'waiting_count': 0,  # 进入等待队列的EV电池数
+            'active_count': 0,  # 当前连接的EV电池数
 
             # 能量统计
             'total_discharge': 0,  # 总放电量(kWh)
@@ -1577,11 +1576,12 @@ class BatteryStationManager:
             'net_energy': 0,  # 净能量交换(kWh)
 
             # 充电满足度统计
-            'completed_count': 0,  # 完成充电的电池数
-            'completed_soc_ratio': 0,  # 完成充电的电池SOC达成率总和
+            'completed_count': 0,  # 完成充电的电池数【原本计划用于统计满足需求的EV数】
+            'completed_soc': 0,  # 完成充电的电池SOC达成率总和
             'avg_completed_soc': 0,  # 平均SOC达成率
+            'charge_satisfaction_ratio': 0,  # 各EV充电满足率之和
             'target_achieved_count': 0,  # 达到目标SOC的电池数
-            'avg_target_achieved': 0,  # 目标达成率
+            'avg_target_achieved': 0,  # 充电满足率平均值(满足率之和/总连接数)
 
             # 服务质量统计
             'avg_waiting_time': 0,  # 平均等待时间(时间步)
@@ -1589,13 +1589,13 @@ class BatteryStationManager:
             'max_waiting_time': 0,  # 最长等待时间
 
             # 时间利用率统计
-            'total_connection_time': 0,  # 总连接时间
-            'charger_utilization': 0,  # 充电桩利用率
+            'total_connection_time': 0,  # 总连接时长
+            'charger_utilization': 0,  # 充电桩利用率(总连接时长/(当前时段*充电桩数))
 
             # 实时指标
             'current_connection_rate': 0,  # 当前连接率(当前连接数/总连接点数)
-            'current_charging_power': 0,  # 当前总充电功率
-            'current_success_rate': 0  # 当前服务成功率
+            'current_charging_power': 0,  # 当前总充电功率(电池状态的actual_power累加)
+            'current_success_rate': 0  # 当前服务成功率(完全满足数/总连接数)
         }
 
     def check_arrivals(self) -> None:
@@ -1631,10 +1631,14 @@ class BatteryStationManager:
                     # 记录电池与连接点的对应关系
                     self.battery_connection_points[idx] = connection_point_id
                     self.battery_connection_points_history[idx] = connection_point_id
+                    # 更新统计数据
+                    self.update_statistics('arrival', connected=True)
                     print(f"时间步 {self.current_step} 执行前: 电池 {name} 已接入")
                 else:
                     # 无接入点可用，加入等待队列
                     self.waiting_queue.append((idx, self.current_step))
+                    # 更新等待队列统计
+                    self.update_statistics('arrival', waiting=True)
                     print(f"时间步 {self.current_step} 执行前: 电池 {self.battery_names[idx]} 加入等待队列")
 
     def check_departures(self) -> None:
@@ -1651,20 +1655,19 @@ class BatteryStationManager:
         for idx, name in list(self.connected_batteries.items()):
             # 1. 先检查是否达到目标SOC
             bat_status = self.controller.get_battery_status(name)
+            initial_soc = self.initial_soc[idx]
+            target_soc = self.target_soc[idx]
             if bat_status and bat_status['soc_percent'] / 100 >= self.target_soc[idx]:  # 达到目标SOC
                 self.controller.disconnect_battery(name)
                 disconnected_indices.append(idx)
-                self.stats['connected_count'] += 1
+                # 更新统计：成功达到目标SOC的电池
+                self.update_statistics('departure',
+                                       idx=idx,
+                                       final_soc=bat_status['soc_percent'] / 100,
+                                       is_target_achieved=True,
+                                       arrival_time=self.arrival[idx])
                 print(
                     f"时间步 {self.current_step} 执行前: 电池 {name} 已充满 (SOC: {bat_status['soc_percent']:.1f}%)，离开")
-
-                # 记录充电完成的统计信息
-                self.stats['completed_count'] = self.stats.get('completed_count', 0) + 1
-                # 莫名奇妙的指标，先不删除
-                self.stats['completed_soc_ratio'] = self.stats.get('completed_soc_ratio', 0) + (
-                        bat_status['soc_percent'] / 100)
-                self.stats['completed_soc_ratio'] = self.stats.get('completed_soc_ratio', 0) + (
-                        bat_status['soc_percent'] / 100)
 
                 # # Deprecated: 相应更新连接点可用信息——添加电池-桩的对应关系后已经不需要
                 # # 1. 充满时间正好和离开时间一致则不需要更新信息
@@ -1682,15 +1685,18 @@ class BatteryStationManager:
 
             # 2. 检查是否到达离开时间
             if self.departure[idx] == self.current_step:
+                final_soc = bat_status['soc_percent'] / 100 if bat_status['soc_percent'] > 0 else 0
+                target_ratio = min(1.0, (final_soc - initial_soc) / (target_soc - initial_soc))
                 # 记录统计信息
-                final_soc = bat_status['soc_percent'] / 100 if bat_status else 0
-                target_ratio = (final_soc - self.initial_soc[idx]) / (self.target_soc[idx] - self.initial_soc[idx])
-                self.stats['target_achieved_ratio'] = self.stats.get('target_achieved_ratio', 0) + target_ratio
+                self.update_statistics('departure',
+                                       idx=idx,
+                                       final_soc=bat_status['soc_percent'] / 100 if bat_status else 0,
+                                       is_target_achieved=False,
+                                       arrival_time=self.arrival[idx])
 
                 # 断开连接
                 self.controller.disconnect_battery(name)
                 disconnected_indices.append(idx)
-                self.stats['connected_count'] += 1
                 print(
                     f"时间步 {self.current_step}: 电池 {name} 已离开，当前SOC: {final_soc * 100:.1f}%，能量满足率: {target_ratio * 100:.1f}%")
 
@@ -1703,14 +1709,6 @@ class BatteryStationManager:
                 del self.battery_connection_points[idx]  # 删除连接点记录
 
             del self.connected_batteries[idx]
-
-        # 更新统计指标的平均值
-        if self.stats.get('completed_count', 0) > 0:
-            self.stats['avg_completed_soc'] = self.stats['completed_soc_ratio'] / self.stats['completed_count']
-
-        if self.stats['connected_count'] > 0:
-            self.stats['avg_target_achieved'] = self.stats.get('target_achieved_ratio', 0) / self.stats[
-                'connected_count']
 
     def process_waiting_queue(self) -> None:
         """处理等待队列中的电池。
@@ -1728,47 +1726,167 @@ class BatteryStationManager:
             earliest_avail_time = min(self.connection_next_avail)
             connection_id = self.connection_next_avail.index(earliest_avail_time)
 
-            if earliest_avail_time <= self.current_step:
-                # 取出队列中第一个电池
-                idx, arrival_time = self.waiting_queue.popleft()
+            # 取出队列中第一个电池
+            idx, arrival_time = self.waiting_queue.popleft()
 
-                # 检查电池是否还在站内时间范围内
-                if self.current_step >= self.departure[idx]:
-                    self.stats['rejected_count'] += 1
-                    print(f"时间步 {self.current_step}: 电池 {self.battery_names[idx]} 已错过离开时间，无法接入")
-                    continue
+            # 检查电池是否还在站内时间范围内
+            if self.current_step >= self.departure[idx]:
+                # 借用到达统计更新拒绝服务信息
+                self.update_statistics('arrival', rejected=True)
+                print(f"时间步 {self.current_step}: 电池 {self.battery_names[idx]} 已错过离开时间，无法接入")
+                continue
 
-                # 连接电池
-                bus = self.bus
-                name = self.battery_names[idx]
-                self.controller.connect_battery(
-                    name=name,
-                    bus=bus,
-                    max_kw=self.max_power[idx],
-                    max_kwh=self.capacity[idx],
-                    initial_soc=self.initial_soc[idx]
-                )
+            # 连接电池
+            bus = self.bus
+            name = self.battery_names[idx]
+            self.controller.connect_battery(
+                name=name,
+                bus=bus,
+                max_kw=self.max_power[idx],
+                max_kwh=self.capacity[idx],
+                initial_soc=self.initial_soc[idx]
+            )
 
-                # 更新已连接电池列表
-                self.connected_batteries[idx] = name
-                # 更新该连接点的下次可用时间
-                self.connection_next_avail[connection_id] = self.departure[idx]
-                # 记录电池与连接点的对应关系
-                self.battery_connection_points[idx] = connection_id
-                self.battery_connection_points_history[idx] = connection_id
+            # 计算等待时间并更新统计
+            wait_time = self.current_step - arrival_time
+            self.update_statistics('waiting', wait_time=wait_time)
 
-                print(f"时间步 {self.current_step} 执行前: 排队电池 {name} 已接入")
+            # 借用到达统计更新连接统计信息
+            self.update_statistics('arrival', connected=True)
+
+            # 更新已连接电池列表
+            self.connected_batteries[idx] = name
+            # 更新该连接点的下次可用时间
+            self.connection_next_avail[connection_id] = self.departure[idx]
+            # 记录电池与连接点的对应关系
+            self.battery_connection_points[idx] = connection_id
+            self.battery_connection_points_history[idx] = connection_id
+
+            print(f"时间步 {self.current_step} 执行前: 排队电池 {name} 已接入")
+
+
+    def update_statistics(self, update_type, **kwargs) -> None:
+        """统一更新统计信息的函数
+
+        Args:
+            update_type (str): 更新类型，可以是'arrival', 'departure', 'waiting', 'connection', 'energy', 'summary'
+            **kwargs: 根据更新类型提供的参数
+        """
+        if update_type == 'arrival':
+            # 更新到达相关统计
+            if kwargs.get('connected', False):
+                # 电池成功连接
+                self.stats['active_count'] += 1
+            elif kwargs.get('waiting', False):
+                # 电池进入等待队列
+                self.stats['waiting_count'] += 1
+            if kwargs.get('rejected', False):
+                # 电池被拒绝（预计无法在停留时间内连接）
+                self.stats['rejected_count'] += 1
+
+            # 更新当前连接率
+            self.stats['current_connection_rate'] = self.stats['active_count'] / self.num_connection_points
+
+        elif update_type == 'departure':
+            # 更新离开相关统计
+            idx = kwargs.get('idx')
+            final_soc = kwargs.get('final_soc', 0)
+            initial_soc = kwargs.get('initial_soc', self.initial_soc[idx] if idx is not None else 0)
+            target_soc = kwargs.get('target_soc', self.target_soc[idx] if idx is not None else 1.0)
+            arrival_time = kwargs.get('arrival_time', self.arrival[idx] if idx is not None else 0)
+            departure_time = kwargs.get('departure_time', self.current_step)
+            is_target_achieved = kwargs.get('is_target_achieved', False)
+
+            # 更新已连接电池计数 Checked
+            self.stats['connected_count'] += 1
+            self.stats['active_count'] -= 1
+
+            # 更新完成充电统计 Checked
+            self.stats['completed_count'] += 1
+            self.stats['completed_soc'] += final_soc
+
+            # 更新目标达成率 - 充电进度/目标进度
+            if is_target_achieved:
+                self.stats['target_achieved_count'] += 1
+                target_ratio = 1.0
+            elif target_soc > initial_soc:  # 避免分母为0
+                target_ratio = min(1.0, (final_soc - initial_soc) / (target_soc - initial_soc))
             else:
-                break
+                target_ratio = 1.0  # 如果初始SOC已经达到或超过目标SOC
+
+            self.stats['charge_satisfaction_ratio'] += target_ratio
+
+            # 更新连接时间
+            connection_time = departure_time - arrival_time
+            self.stats['total_connection_time'] += connection_time
+
+            # 更新平均SOC
+            if self.stats['completed_count'] > 0:
+                self.stats['avg_completed_soc'] = self.stats['completed_soc'] / self.stats['completed_count']
+
+            # 更新目标达成平均值
+            if self.stats['connected_count'] > 0:
+                self.stats['avg_target_achieved'] = self.stats.get('charge_satisfaction_ratio', 0) / self.stats[
+                    'connected_count']
+
+            # 更新充电桩利用率
+            if self.current_step > 0:
+                self.stats['charger_utilization'] = self.stats['total_connection_time'] / (
+                            self.current_step * self.num_connection_points)
+
+            # 更新当前连接率
+            self.stats['current_connection_rate'] = self.stats['active_count'] / self.num_connection_points
+
+            # 更新当前服务成功率
+            if self.stats['connected_count'] > 0:
+                self.stats['current_success_rate'] = self.stats['target_achieved_count'] / self.stats['connected_count']
+
+        elif update_type == 'waiting':
+            # 更新等待队列相关统计
+            wait_time = kwargs.get('wait_time', 0)
+            self.stats['total_waiting_time'] += wait_time
+            self.stats['max_waiting_time'] = max(self.stats['max_waiting_time'], wait_time)
+
+            # 更新平均等待时间
+            if self.stats['waiting_count'] > 0:
+                self.stats['avg_waiting_time'] = self.stats['total_waiting_time'] / self.stats['waiting_count']
+
+        elif update_type == 'energy':
+            # 更新能量相关统计
+            power = kwargs.get('power', 0)
+            duration = kwargs.get('duration', 0.25)  # 默认15分钟，转为小时为0.25
+
+            if power > 0:  # 放电
+                self.stats['total_discharge'] += power * duration
+            else:  # 充电
+                self.stats['total_charge'] += abs(power) * duration
+
+            # 更新净能量
+            self.stats['net_energy'] = self.stats['total_discharge'] - self.stats['total_charge']
+
+        elif update_type == 'summary':
+            # 更新总体统计数据，通常在时间步结束时调用
+
+            # 更新当前充电功率
+            total_charging_power = 0
+            for idx, name in self.connected_batteries.items():
+                bat_status = self.controller.get_battery_status(name)
+                if bat_status and bat_status['actual_power'] < 0:  # 充电为负值
+                    total_charging_power += abs(bat_status['actual_power'])
+            self.stats['current_charging_power'] = total_charging_power
 
     def update_schedule(self):
         """更新电池功率调度记录"""
+        # total_charging_power = 0
         for idx, name in self.connected_batteries.items():
             if self.arrival[idx] <= self.current_step < self.departure[idx]:
-                status = self.controller.get_battery_status(name)
-                if status:
-                    # 记录实际功率，正值表示放电，负值表示充电
-                    self.schedule[idx, self.current_step] = -status['actual_power']
+                bat_status = self.controller.get_battery_status(name)
+                if bat_status:
+                    # 记录EV视角的功率，正值表示充电
+                    self.schedule[idx, self.current_step] = bat_status['charging_power']
+                # total_charging_power += bat_status['charging_power']
+        # 更新当前充电功率
+        # self.stats['current_charging_power'] = total_charging_power
 
     def update_before_solve(self):
         """在OpenDSS求解前更新，处理电池到达、队列和离开
@@ -1910,38 +2028,40 @@ class BatteryStationManager:
         self.current_step = 0
         self.schedule = np.zeros((self.battery_count, self.total_steps))
 
-        # 重置统计数据
+        # 重置性能统计
         self.stats = {
-            'connected_count': 0,
-            'rejected_count': 0,
-            'waiting_count': 0,
-            'active_count': 0,
+            # 基本连接统计
+            'connected_count': 0,  # 已连接的EV电池数【原本计划用于统计已连接过的EV数，在断开时计数】
+            'rejected_count': 0,  # 未能连接的EV电池数
+            'waiting_count': 0,  # 进入等待队列的EV电池数
+            'active_count': 0,  # 当前连接的EV电池数
 
             # 能量统计
-            'total_discharge': 0,
-            'total_charge': 0,
-            'net_energy': 0,
+            'total_discharge': 0,  # 总放电量(kWh)
+            'total_charge': 0,  # 总充电量(kWh)
+            'net_energy': 0,  # 净能量交换(kWh)
 
             # 充电满足度统计
-            'completed_count': 0,
-            'completed_soc_ratio': 0,
-            'avg_completed_soc': 0,
-            'target_achieved_count': 0,
-            'avg_target_achieved': 0,
+            'completed_count': 0,  # 完成充电的电池数【原本计划用于统计满足需求的EV数】
+            'completed_soc': 0,  # 完成充电的电池SOC达成率总和
+            'avg_completed_soc': 0,  # 平均SOC达成率
+            'charge_satisfaction_ratio': 0,  # 各EV充电满足率之和
+            'target_achieved_count': 0,  # 达到目标SOC的电池数
+            'avg_target_achieved': 0,  # 充电满足率平均值(满足率之和/总连接数)
 
             # 服务质量统计
-            'avg_waiting_time': 0,
-            'total_waiting_time': 0,
-            'max_waiting_time': 0,
+            'avg_waiting_time': 0,  # 平均等待时间(时间步)
+            'total_waiting_time': 0,  # 总等待时间
+            'max_waiting_time': 0,  # 最长等待时间
 
             # 时间利用率统计
-            'total_connection_time': 0,
-            'charger_utilization': 0,
+            'total_connection_time': 0,  # 总连接时长
+            'charger_utilization': 0,  # 充电桩利用率(总连接时长/(当前时段*充电桩数))
 
             # 实时指标
-            'current_connection_rate': 0,
-            'current_charging_power': 0,
-            'current_success_rate': 0
+            'current_connection_rate': 0,  # 当前连接率(当前连接数/总连接点数)
+            'current_charging_power': 0,  # 当前总充电功率(电池状态的actual_power累加)
+            'current_success_rate': 0  # 当前服务成功率(完全满足数/总连接数)
         }
 
         print("BatteryStationManager已重置")
