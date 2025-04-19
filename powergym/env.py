@@ -19,7 +19,7 @@ Improve:
 
 Note: 修改对应位置
     状态空间在step()和reset_obs_space()中修改适配（可能还有其他地方）；
-    奖励函数在MyReward类中修改，需要依靠对应的obs信息；
+    奖励函数在MyReward类中修改，需要依靠对应的obs或info信息；
     动作空间在ActionSpace类中修改，并需要在step和Env.init修改适配；
     拓扑设置在对应daily的dss文件中修改；
     时间步修改在dss和env_register中修改；

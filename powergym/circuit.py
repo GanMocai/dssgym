@@ -2,12 +2,12 @@
 
 """
 Todo:
-    1. 验证修改的可行性
-    2. PV参考解博的实现，添加进去
+    1. PV参考解博的实现，添加进去
 
 Improve:
-    1. 修改时间步长及适配
+    1. 修改时间步长
     2. 绕开csv设置电池（使用circuit已有add_batteries），添加EV电池的接入和断开操作（参考EVChargingStaion）
+    3. 各类适配
 
 在python中定义各种元器件的特性，使用 OpenDSS 进行电力系统仿真。
 
