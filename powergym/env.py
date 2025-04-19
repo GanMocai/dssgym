@@ -1,3 +1,5 @@
+# Copyright 2021 Siemens Corporation
+# Copyright 2025 Su Chenhui
 # SPDX-License-Identifier: MIT
 
 """
