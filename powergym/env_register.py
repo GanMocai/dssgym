@@ -293,7 +293,7 @@ _ENV_INFO = {
 _STATION_INFO = {
     '13Bus': {
         'bus_name': '671',  # 充电站连接的母线名称
-        'num_chargers': 5,  # 充电桩数量
+        'num_chargers': 10,  # 充电桩数量
         # 'ev_price': '13Bus_ev_price.csv',  # 电价文件
     },
     '34Bus': {

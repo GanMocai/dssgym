@@ -20,7 +20,7 @@ Improve:
     2. 添加ev充电需求接口，充电站管理模块，相应统计添加在其中。
 
 Note: 修改对应位置
-    状态空间在step()和reset_obs_space()中修改适配（可能还有其他地方）；
+    状态空间在step()和reset_obs_space()中修改，并需要在wrap_obs()中补充适配（可能还有其他地方）；
     奖励函数在MyReward类中修改，需要依靠对应的obs或info信息；
     动作空间在ActionSpace类中修改，并需要在step和Env.init修改适配；
     拓扑设置在对应daily的dss文件中修改；
@@ -171,7 +171,7 @@ def get_basekv(env, buses) -> list[str]:
 
 
 # %% 动作空间
-class ActionSpace:
+class ActionSpaceV0:
     """电容器、调压器和电池的动作空间封装
 
     Attributes:
@@ -227,7 +227,7 @@ class ActionSpace:
 
 
 class ActionSpace:
-    """电池充电功率的动作空间封装。重定义。
+    """电池充电功率的动作空间封装。剔除电容和变压器抽头的动作。
 
     Attributes:
         bat_num (int): 电池的总数量
@@ -246,7 +246,7 @@ class ActionSpace:
             self.space = gym.spaces.MultiDiscrete([self.bat_act_num] * self.bat_num)
         else:
             # 连续
-            self.space = gym.spaces.Box(low=-1, high=1, shape=(self.bat_num,), dtype=np.float32)
+            self.space = gym.spaces.Box(low=0, high=1, shape=(self.bat_num,), dtype=np.float32)  # To avoid or confine V2G, change it.
 
     def sample(self) -> np.ndarray:
         """返回从动作空间采样的一个随机动作.
@@ -317,7 +317,6 @@ class Env(gym.Env):
         transformers (dict): 系统中变压器的字典
     """
 
-    # Todo: 修改初始化和动作状态空间
     def __init__(self, folder_path, info, dss_act=False):
         """
         利用dss文件和环境信息初始化环境
@@ -439,6 +438,11 @@ class Env(gym.Env):
             print(f"Regulator bound dimension: {self.reg_num}")
             low, high = low + [0, -1] * self.bat_num, high + [1, 1] * self.bat_num  # add bat bound
             print(f"Battery bound dimension: {self.bat_num * 2}")
+
+            # 添加充电站实时指标维度
+            low, high = low + [0.0, 0.0, 0.0, 0.0], high + [1.0, float('inf'), 1.0, 1.0]  # 连接率,充电功率,成功率,完成率（成功率）
+            print(f"EV station metrics dimension: 4")
+
             if observe_load:
                 low, high = low + [0.0] * nload, high + [1.0] * nload  # add load bound
                 print(f"Load bound dimension: {nload}")
@@ -517,7 +521,8 @@ class Env(gym.Env):
             p = self.powerloss_reward()
             v, vio_nodes = self.voltage_reward(record_node)
             t = self.ctrl_reward(cd, rd, soc, dis)
-            summ = p + v + t
+            c = self.completion_reward()  # 添加充电完成率奖励
+            summ = p + v + t + c
 
             info = dict() if not record_node else {'violated_nodes': vio_nodes}
             if full:
@@ -592,7 +597,7 @@ class Env(gym.Env):
         self.obs['cap_statuses'] = cap_statuses
         self.obs['reg_statuses'] = reg_statuses
         self.obs['bat_statuses'] = bat_statuses
-        self.obs['power_loss'] = - self.circuit.total_loss()[0] / self.circuit.total_power()[0]  # 功率损耗和总功率的比值
+        self.obs['power_loss'] = - self.circuit.total_loss()[0] / self.circuit.total_power()[0]
         self.obs['time'] = self.t
         if self.observe_load:
             self.obs['load_profile_t'] = self.all_load_profiles.iloc[self.t % self.horizon].to_dict()  # 截取负载曲线包括在obs中
@@ -703,9 +708,21 @@ class Env(gym.Env):
         self.obs['cap_statuses'] = cap_statuses
         self.obs['reg_statuses'] = reg_statuses
         self.obs['bat_statuses'] = bat_statuses
-        self.obs['power_loss'] = - self.circuit.total_loss()[0] / self.circuit.total_power()[0]
+        self.obs['power_loss'] = - self.circuit.total_loss()[0] / self.circuit.total_power()[0]  # 功率损耗和总功率的比值
         self.obs['time'] = self.t
-        # Todo: 加入充电站的状态信息
+        # 加入充电站的状态信息
+        # 添加充电站的实时指标
+        if hasattr(self, 'ev_station') and self.ev_station is not None:
+            self.obs['ev_connection_rate'] = self.ev_station.stats['current_connection_rate']
+            self.obs['ev_charging_power'] = self.ev_station.stats['current_charging_power']
+            self.obs['ev_success_rate'] = self.ev_station.stats['current_success_rate']
+            # 保存充电满足率
+            self.obs['com'] = self.ev_station.stats['current_connection_rate']
+        else:
+            self.obs['ev_connection_rate'] = 0.0
+            self.obs['ev_charging_power'] = 0.0
+            self.obs['ev_success_rate'] = 0.0
+            self.obs['com'] = 0.0
         if self.observe_load:
             self.obs['load_profile_t'] = self.all_load_profiles.iloc[self.t % self.horizon].to_dict()
 
@@ -867,9 +884,20 @@ class Env(gym.Env):
             'load_profile_idx': load_profile_idx
         }
 
-        # 重置充电站
+        # 重置充电站和相应的状态信息
         if hasattr(self, 'ev_station') and self.ev_station is not None:
             self.ev_station.reset()
+        # 充电站的实时指标
+        if hasattr(self, 'ev_station') and self.ev_station is not None:
+            self.obs['ev_connection_rate'] = self.ev_station.stats['current_connection_rate']
+            self.obs['ev_charging_power'] = self.ev_station.stats['current_charging_power']
+            self.obs['ev_success_rate'] = self.ev_station.stats['current_success_rate']
+            self.obs['com'] = 0.0  # 初始时完成率为0
+        else:
+            self.obs['ev_connection_rate'] = 0.0
+            self.obs['ev_charging_power'] = 0.0
+            self.obs['ev_success_rate'] = 0.0
+            self.obs['com'] = 0.0
 
         if self.wrap_observation:
             return self.wrap_obs(self.obs), info
@@ -948,6 +976,10 @@ class Env(gym.Env):
             a numpy array of observation.
         """
         key_obs = ['bus_voltages', 'cap_statuses', 'reg_statuses', 'bat_statuses']
+
+        # 添加充电站实时指标
+        ev_metrics = ['ev_connection_rate', 'ev_charging_power', 'ev_success_rate', 'com']
+
         if self.observe_load:
             key_obs.append('load_profile_t')
 
@@ -962,6 +994,11 @@ class Env(gym.Env):
                 mod_obs = mod_obs + list(obs[var_dict].values())
             elif var_dict == 'power_loss':
                 mod_obs.append(obs['power_loss'])
+
+        # 添加充电站指标
+        for metric in ev_metrics:
+            mod_obs.append(obs[metric])
+
         return np.hstack(mod_obs)
 
     def build_graph(self):
