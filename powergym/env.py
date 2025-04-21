@@ -21,6 +21,7 @@ Improve:
 
 Note: 修改对应位置
     状态空间在step()和reset_obs_space()中修改，并需要在wrap_obs()中补充适配（可能还有其他地方）；
+        observe_load的启用和关闭在初始化和reset_obs_space()中进行；
     奖励函数在MyReward类中修改，需要依靠对应的obs或info信息；
     动作空间在ActionSpace类中修改，并需要在step和Env.init修改适配；
     拓扑设置在对应daily的dss文件中修改；
@@ -344,7 +345,7 @@ class Env(gym.Env):
         self.show_node_labels = info['show_node_labels']
         self.scale = info['scale'] if 'scale' in info else 1.0
         self.wrap_observation = True
-        self.observe_load = True  # 设置观察负荷曲线
+        self.observe_load = True  # 设置观察负荷，启用后从loadprofile截取负载曲线包括在obs中
         self.lines = None  # 连接电路中节点的边的字典
 
         # 生成负荷 profile files
@@ -430,14 +431,14 @@ class Env(gym.Env):
             nload = len(self.obs['load_profile_t'])
 
         if self.wrap_observation:
-            low, high = [0.8] * nnode, [1.2] * nnode  # add voltage bound
-            print(f"\nVoltage bound dimension: {nnode}")
+            low, high = [0.8] * nnode, [1.2] * nnode  # add voltage bound  最开始是[0.8,1.2]
+            print(f"\n电压边界维度: {nnode}")
             low, high = low + [0] * self.cap_num, high + [1] * self.cap_num  # add cap bound
-            print(f"Capacitor bound dimension: {self.cap_num}")
+            print(f"电容边界维度: {self.cap_num}")
             low, high = low + [0] * self.reg_num, high + [self.reg_act_num] * self.reg_num  # add reg bound
-            print(f"Regulator bound dimension: {self.reg_num}")
+            print(f"Regulator边界维度: {self.reg_num}")
             low, high = low + [0, -1] * self.bat_num, high + [1, 1] * self.bat_num  # add bat bound
-            print(f"Battery bound dimension: {self.bat_num * 2}")
+            print(f"电池边界维度: {self.bat_num * 2}")
 
             # 添加充电站实时指标维度
             low, high = low + [0.0, 0.0, 0.0, 0.0], high + [1.0, float('inf'), 1.0, 1.0]  # 连接率,充电功率,成功率,完成率（成功率）
@@ -445,9 +446,9 @@ class Env(gym.Env):
 
             if observe_load:
                 low, high = low + [0.0] * nload, high + [1.0] * nload  # add load bound
-                print(f"Load bound dimension: {nload}")
+                print(f"Load 边界维度: {nload}")
             low, high = np.array(low, dtype=np.float32), np.array(high, dtype=np.float32)
-            self.observation_space = gym.spaces.Box(low, high)
+            self.observation_space = gym.spaces.Box(low, high, dtype=np.float32)  # Note: 设置为np.float32试试水
             # 打印总维度
             print(f"观察空间维度设置为: {len(low)}")
         else:
@@ -465,7 +466,6 @@ class Env(gym.Env):
 
     class MyReward:
         """奖励函数定义类（位置在环境类中以简化代码，类名不影响功能），定义了多种奖励函数，包括功率损耗、电压违规和控制成本等。
-        Todo: 需要添加充电完成率相关奖励函数。
         
         Attributes:
             env (obj): 继承环境的所有属性
@@ -488,7 +488,7 @@ class Env(gym.Env):
             return -ratio * self.power_w
 
         def ctrl_reward(self, capdiff, regdiff, soc_err, discharge_err):
-            # 动作惩罚
+            # 动作惩罚，调节cap和reg会有惩罚，最终SOC小于最初的SOC也会给出一个惩罚。
             # capdiff: abs(current_cap_state - new_cap_state)
             # regdiff: abs(current_reg_tap_num - new_reg_tap_num)
             # soc_err: abs(soc - initial_soc)
@@ -528,6 +528,7 @@ class Env(gym.Env):
             if full:
                 info.update({'power_loss_ratio': -p / self.power_w,
                              'vol_reward': v, 'ctrl_reward': t})
+            print("奖励组成项分别为")
 
             return summ, info
 
@@ -710,21 +711,35 @@ class Env(gym.Env):
         self.obs['bat_statuses'] = bat_statuses
         self.obs['power_loss'] = - self.circuit.total_loss()[0] / self.circuit.total_power()[0]  # 功率损耗和总功率的比值
         self.obs['time'] = self.t
-        # 加入充电站的状态信息
-        # 添加充电站的实时指标
+        # 加入充电站的状态信息——实时信息
         if hasattr(self, 'ev_station') and self.ev_station is not None:
             self.obs['ev_connection_rate'] = self.ev_station.stats['current_connection_rate']
             self.obs['ev_charging_power'] = self.ev_station.stats['current_charging_power']
             self.obs['ev_success_rate'] = self.ev_station.stats['current_success_rate']
-            # 保存充电满足率
-            self.obs['com'] = self.ev_station.stats['current_connection_rate']
+            self.obs['com'] = self.ev_station.stats['current_success_rate']
         else:
             self.obs['ev_connection_rate'] = 0.0
             self.obs['ev_charging_power'] = 0.0
             self.obs['ev_success_rate'] = 0.0
             self.obs['com'] = 0.0
         if self.observe_load:
-            self.obs['load_profile_t'] = self.all_load_profiles.iloc[self.t % self.horizon].to_dict()
+            self.obs['load_profile_t'] = self.all_load_profiles.iloc[self.t % self.horizon].to_dict()  # 截取负载曲线包括在obs中
+
+        # 检查观察值
+        if isinstance(self.obs, dict):
+            for key, value in self.obs.items():
+                # 检查值类型并相应处理
+                if isinstance(value, dict):
+                    # 如果值是字典，跳过或递归检查
+                    continue
+                elif isinstance(value, (list, np.ndarray)):
+                    # 如果是数组类型，检查是否包含极端值
+                    if np.any(np.abs(np.array(value, dtype=float)) > 1e20):
+                        print(f"极端观察值检测在key '{key}': {value}")
+                elif isinstance(value, (int, float)):
+                    # 如果是标量，直接检查
+                    if abs(value) > 1e20:
+                        print(f"极端观察值检测在key '{key}': {value}")
 
         # 为兼容gymnasium的更新要求: split 'done' into 'terminated' and 'truncated'
         terminated = (self.t == self.horizon)  # Episode is done due to termination condition

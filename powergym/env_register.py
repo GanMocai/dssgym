@@ -347,8 +347,8 @@ for env in _ENV_INFO.keys():
     _ENV_INFO[env].update(_STATION_INFO[sys])
     # 在info中ev 充电需求队列文件路径
     _ENV_INFO[env].update(_EV_INFO[sys])
-    # 再 info 中添加充电完成率的权重
-    _ENV_INFO[env]['com_w'] = 1.0 / _ENV_INFO[env]['num_chargers']  # Todo: 其他地方尚未完成修改
+    # 在 info 中添加充电站相关充电完成率的权重
+    _ENV_INFO[env]['com_w'] = 1.0
 
 
 # %% 函数

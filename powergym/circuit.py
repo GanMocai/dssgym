@@ -1020,7 +1020,7 @@ class Battery(Node):
         Returns:
             the valid discharge kw
         """
-        # Todo: 将映射处理改为统一基准值，但应该会影响训练收敛，先不动。
+        # Todo: 目前是按照Battery初始化时的额定功率作为基准值，后续将映射处理改为统一基准值，但应该会影响训练收敛，先不动。
         if self.bat_act_num == np.inf:
             kw = max(-1.0, min(1.0, nkw_or_state)) * self.max_kw
             if kw > 0:
