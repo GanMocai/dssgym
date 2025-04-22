@@ -24,6 +24,7 @@ Note: 修改对应位置
         observe_load的启用和关闭在初始化和reset_obs_space()中进行；
     奖励函数在MyReward类中修改，需要依靠对应的obs或info信息；
     动作空间在ActionSpace类中修改，并需要在step和Env.init修改适配；
+        动作空间的修改还需要在battery的功率映射中中进行调整。
     拓扑设置在对应daily的dss文件中修改；
     时间步修改在dss和env_register中修改；
 """
@@ -595,11 +596,11 @@ class Env(gym.Env):
                 ev_statuses = self.circuit.ev_station.get_all_statuses()
                 for idx, status in enumerate(ev_statuses):
                     # 为充电站的每个连接点创建一个虚拟电池状态
-                    bat_statuses[f'ev_{idx:03d}'] = status
+                    bat_statuses[f'charger_{idx:02d}'] = status
         else:
             soc_errs, dis_errs, bat_statuses = [], [], dict()
 
-        # print(f'当前在执行step函数，电池状态键值对的数量为{len(bat_statuses)}.')  # 通过输出检查
+        # print(f'当前在执行step函数，电池状态键值对的数量为{len(bat_statuses)}.')  # 通过输出检查电池接入情况
 
         # 更新时间步
         self.t += 1
@@ -625,6 +626,7 @@ class Env(gym.Env):
         self.obs['bat_statuses'] = bat_statuses
         self.obs['power_loss'] = - self.circuit.total_loss()[0] / self.circuit.total_power()[0]  # 功率损耗和总功率的比值
         self.obs['time'] = self.t
+
         # 加入充电站的状态信息——实时信息
         if hasattr(self, 'ev_station') and self.ev_station is not None:
             self.obs['ev_connection_rate'] = self.ev_station.stats['current_connection_rate']
@@ -636,6 +638,7 @@ class Env(gym.Env):
             self.obs['ev_charging_power'] = 0.0
             self.obs['ev_success_rate'] = 0.0
             self.obs['com'] = 0.0
+
         if self.observe_load:
             self.obs['load_profile_t'] = self.all_load_profiles.iloc[self.t % self.horizon].to_dict()  # 截取负载曲线包括在obs中
 
@@ -705,6 +708,10 @@ class Env(gym.Env):
         # reset time
         self.t = 0
 
+        # 重置充电站——确保obs的bat_statuses能正常工作
+        if hasattr(self, 'ev_station') and self.ev_station is not None:
+            self.ev_station.reset()
+
         # choose load profile
         self.load_profile.choose_loadprofile(load_profile_idx)
         self.all_load_profiles = self.load_profile.get_loadprofile(load_profile_idx)
@@ -733,14 +740,14 @@ class Env(gym.Env):
         #                 self.circuit.batteries.items()}  # 原本
         bat_statuses = {}
         # 添加电路中定义的静态电池
-        for name, bat in self.circuit.batteries.items():
+        for name, bat in self.circuit.storage_batteries.items():
             bat_statuses[name] = [bat.soc, -1 * bat.actual_power() / bat.max_kw]
 
         # 添加充电站EV的初始状态
         if hasattr(self, 'ev_station') and self.ev_station is not None:
             ev_statuses = self.ev_station.get_all_statuses()
             for idx, status in enumerate(ev_statuses):
-                bat_statuses[f'ev_{idx:03d}'] = status
+                bat_statuses[f'charger_{idx:02d}'] = status
         self.obs['bat_statuses'] = bat_statuses
 
         # total power loss
@@ -761,15 +768,12 @@ class Env(gym.Env):
             'load_profile_idx': load_profile_idx
         }
 
-        # 重置充电站和相应的状态信息
-        if hasattr(self, 'ev_station') and self.ev_station is not None:
-            self.ev_station.reset()
-        # 充电站的实时指标
+        # 重置充电站的状态信息
         if hasattr(self, 'ev_station') and self.ev_station is not None:
             self.obs['ev_connection_rate'] = self.ev_station.stats['current_connection_rate']
             self.obs['ev_charging_power'] = self.ev_station.stats['current_charging_power']
             self.obs['ev_success_rate'] = self.ev_station.stats['current_success_rate']
-            self.obs['com'] = 0.0  # 初始时完成率为0
+            self.obs['com'] = self.ev_station.stats['current_success_rate']
         else:
             self.obs['ev_connection_rate'] = 0.0
             self.obs['ev_charging_power'] = 0.0

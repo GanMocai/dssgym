@@ -106,7 +106,7 @@ class Circuits:
         # 原校验过程
         # assert len(nkws_or_states) > 0 and len(nkws_or_states) == len(self.batteries), 'inconsistent states'
 
-        # 将智能体的输出转换为合法的电池控制
+        # 将智能体的输出转换为合法的电池功率控制
         if self.bat_act_num == np.inf:  # 连续空间
             nkws_or_states = np.array(nkws_or_states, dtype=np.float32)
         else:
@@ -129,10 +129,10 @@ class Circuits:
 
             # 遍历所有EV连接点位置
             for j in range(self.ev_station.num_connection_points):
-                idx = static_battery_count + j
+                idx_in_nkws_or_states = static_battery_count + j
 
                 # 跳过超出动作空间的部分
-                if idx >= len(nkws_or_states):
+                if idx_in_nkws_or_states >= len(nkws_or_states):
                     continue
 
                 # 查找连接到此连接点的EV
@@ -148,7 +148,7 @@ class Circuits:
 
                     if full_name in self.batteries:
                         batt = self.batteries[full_name]
-                        kw = batt.state_projection(nkws_or_states[idx])
+                        kw = batt.state_projection(nkws_or_states[idx_in_nkws_or_states])
                         kvar = kw / batt.pf
                         bat2kwkvar[batt.name[8:]] = (kw, kvar)
         # # 原设置电池对象
@@ -169,6 +169,7 @@ class Circuits:
                     kw, kvar = bat2kwkvar[dssGen.Name]
                     dssGen.kW = kw
                     dssGen.kvar = kvar
+                    print(dssGen.Name, dssGen.kW, dssGen.kvar)
                 if dssGen.Next == 0:  # 没有下一个这类对象
                     break
 
@@ -193,7 +194,7 @@ class Circuits:
         soc_errs = np.zeros(total_actions)
         discharge_errs = np.zeros(total_actions)
 
-        # 1. 更新静态储能电池状态并记录变化
+        # 1. 更新静态储能电池err状态并记录变化
         for i, bat_name in enumerate(self.storage_batteries.keys()):
             if bat_name in self.batteries:  # 确保电池存在
                 batt = self.batteries[bat_name]
@@ -207,51 +208,36 @@ class Circuits:
                 else:
                     discharge_errs[i] = max(0.0, batt.avail_kw[batt.state]) / batt.max_kw
 
-            # 1. 更新静态储能电池状态并记录变化
-            for i, bat_name in enumerate(self.storage_batteries.keys()):
-                if bat_name in self.batteries:  # 确保电池存在
-                    batt = self.batteries[bat_name]
-                    batt.kwh += batt.actual_power() * batt.duration
-                    batt.kwh = round(max(0.0, min(batt.max_kwh, batt.kwh)))
-                    batt.soc = batt.kwh / batt.max_kwh
-                    soc_errs[i] = abs(batt.soc - batt.initial_soc)
+        # 2. 更新EV电池err状态
+        if hasattr(self, 'ev_station') and self.ev_station is not None:
+            static_battery_count = len(self.storage_batteries)
 
-                    if self.bat_act_num == np.inf:
-                        discharge_errs[i] = max(0.0, batt.kw) / batt.max_kw
-                    else:
-                        discharge_errs[i] = max(0.0, batt.avail_kw[batt.state]) / batt.max_kw
+            # 对所有EV连接点位置，无论是否有EV连接，都更新对应位置的状态变化数组
+            for j in range(self.ev_station.num_connection_points):
+                idx_in_bat_errs = static_battery_count + j
 
-            # 2. 更新EV电池状态
-            if hasattr(self, 'ev_station') and self.ev_station is not None:
-                static_battery_count = len(self.storage_batteries)
+                # 查找连接到此连接点的EV
+                ev_idx = None
+                for battery_idx, connection_id in self.ev_station.battery_connection_points.items():
+                    if connection_id == j and battery_idx in self.ev_station.connected_batteries:
+                        ev_idx = battery_idx
+                        break
 
-                # 对所有EV连接点位置，无论是否有EV连接，都更新对应位置的状态变化数组
-                for j in range(self.ev_station.num_connection_points):
-                    idx = static_battery_count + j
+                if ev_idx is not None:  # 如果有EV连接到此连接点
+                    ev_name = self.ev_station.connected_batteries[ev_idx]
+                    full_name = f"Battery.{ev_name}" if not ev_name.startswith("Battery.") else ev_name
 
-                    # 查找连接到此连接点的EV
-                    ev_idx = None
-                    for battery_idx, connection_id in self.ev_station.battery_connection_points.items():
-                        if connection_id == j and battery_idx in self.ev_station.connected_batteries:
-                            ev_idx = battery_idx
-                            break
+                    if full_name in self.batteries:  # 确保电池存在
+                        batt = self.batteries[full_name]
+                        batt.kwh += batt.actual_power() * batt.duration
+                        batt.kwh = round(max(0.0, min(batt.max_kwh, batt.kwh)))
+                        batt.soc = batt.kwh / batt.max_kwh
+                        soc_errs[idx_in_bat_errs] = abs(batt.soc - batt.initial_soc)
 
-                    if ev_idx is not None:  # 如果有EV连接到此连接点
-                        ev_name = self.ev_station.connected_batteries[ev_idx]
-                        full_name = f"Battery.{ev_name}" if not ev_name.startswith("Battery.") else ev_name
-
-                        if full_name in self.batteries:  # 确保电池存在
-                            batt = self.batteries[full_name]
-                            batt.kwh += batt.actual_power() * batt.duration
-                            batt.kwh = round(max(0.0, min(batt.max_kwh, batt.kwh)))
-                            batt.soc = batt.kwh / batt.max_kwh
-                            soc_errs[idx] = abs(batt.soc - batt.initial_soc)
-
-                            if self.bat_act_num == np.inf:
-                                discharge_errs[idx] = max(0.0, batt.kw) / batt.max_kw
-                            else:
-                                discharge_errs[idx] = max(0.0, batt.avail_kw[batt.state]) / batt.max_kw
-                    # 如果没有EV连接，则对应位置保持零值
+                        if self.bat_act_num == np.inf:
+                            discharge_errs[idx_in_bat_errs] = max(0.0, batt.kw) / batt.max_kw
+                        else:
+                            discharge_errs[idx_in_bat_errs] = max(0.0, batt.avail_kw[batt.state]) / batt.max_kw
                 # 如果没有EV连接，这个位置的soc_errs和discharge_errs保持为0
 
         # 原处理过程
@@ -1096,16 +1082,16 @@ class Battery(Node):
 
     def actual_power(self):
         # get the actual power computed by dss in [-kw, -kvar] in dss, the minus means power generation
-        # actual_power < 0 means discharging 和 opendss 内置的 storage 相反
-        name = 'Generator.' + self.name[8:]
-        return self.dss.ActiveCircuit.CktElements(name).TotalPowers[0]
+        # actual_power < 0 means discharging （和 opendss 内置的 storage 相反）
+        try:
+            name = 'Generator.' + self.name[8:]
+            return self.dss.ActiveCircuit.CktElements(name).TotalPowers[0]
+        except Exception as e:
+            print(e)
+            return 0.0
 
     def reset(self):
-        # Todo: 移除添加过的EV电池，重置排队
-        # 断开所有额外添加的电池（检查EV）
-        # 重置电站管理（排队）
-
-        # 对储能电池 reset the charge
+        # reset the charge
         self.soc = self.initial_soc
         self.kwh = self.soc * self.max_kwh
 
@@ -1150,13 +1136,14 @@ class BatteryController:
         if f"Battery.{name}" in self.active_batteries:
             self.disconnect_battery(name)
 
-        # 创建OpenDSS中的实际对象
+        # 创建OpenDSS中的实际对象——电压等级等和dss中创建的储能保持一致
         self.dss.Text.Commands(f"""
             New Generator.{name}
             ~ phases=3
             ~ bus1={bus}
-            ~ kV=0.4
-            ~ kW=0
+            ~ kV=4.16
+            ~ kW=0.0
+            ~ conn=Delta
             ~ PF={pf}
             ~ model=1
             ~ enabled=True
@@ -1389,7 +1376,7 @@ def load_ev_from_csv(csv_path):
         csv_path (str): ev充电需求信息的csv文件路径
 
     Returns:
-        dict: 包含BatteryStationManager初始化所需的参数
+        dict: 包含BatteryStationManager初始化所需的参数，SOC将四舍五入为二位小数
             - arrival: 到达时间列表
             - departure: 离开时间列表
             - max_power: 最大功率列表
@@ -1417,8 +1404,8 @@ def load_ev_from_csv(csv_path):
             'departure': df['depart_time'].tolist(),
             'max_power': df['power_support'].tolist(),
             'capacity': df['battery_capacity'].tolist(),
-            'initial_soc': df['start_soc'].tolist(),
-            'target_soc': df['end_soc'].tolist(),
+            'initial_soc': [round(x, 2) for x in df['start_soc'].tolist()],
+            'target_soc': [round(x, 2) for x in df['end_soc'].tolist()],
         }
 
         # 添加可选列
@@ -1545,8 +1532,8 @@ class BatteryStationManager:
         self.connected_batteries = {}  # 已连接电池 {idx: battery_name}，当前连接的电池
         self.connection_next_avail = [0] * num_connection_points  # 各接入点下次可用时间
         # 添加一个新字典来记录当前的电池与连接点的对应关系
-        self.battery_connection_points = {}  # {idx: connection_point_id}，会自动清理
-        self.battery_connection_points_history = {}  # {idx: connection_point_id}，用于记录电池与连接点的对应关系
+        self.battery_connection_points = {}  # {battery_idx: connection_point_id}，会自动清理
+        self.battery_connection_points_history = {}  # {battery_idx: connection_point_id}，用于记录电池与连接点的对应关系
 
         # 时间和调度
         self.total_steps = total_steps
@@ -1723,7 +1710,7 @@ class BatteryStationManager:
         """
         while self.waiting_queue and min(self.connection_next_avail) <= self.current_step:
             earliest_avail_time = min(self.connection_next_avail)
-            connection_id = self.connection_next_avail.index(earliest_avail_time)
+            connection_point_id = self.connection_next_avail.index(earliest_avail_time)
 
             # 取出队列中第一个电池
             idx, arrival_time = self.waiting_queue.popleft()
@@ -1756,10 +1743,10 @@ class BatteryStationManager:
             # 更新已连接电池列表
             self.connected_batteries[idx] = name
             # 更新该连接点的下次可用时间
-            self.connection_next_avail[connection_id] = self.departure[idx]
+            self.connection_next_avail[connection_point_id] = self.departure[idx]
             # 记录电池与连接点的对应关系
-            self.battery_connection_points[idx] = connection_id
-            self.battery_connection_points_history[idx] = connection_id
+            self.battery_connection_points[idx] = connection_point_id
+            self.battery_connection_points_history[idx] = connection_point_id
 
             print(f"时间步 {self.current_step} 执行前: 排队电池 {name} 已接入")
 
@@ -1771,8 +1758,7 @@ class BatteryStationManager:
             update_type (str): 更新类型，可以是'arrival', 'departure', 'waiting', 'connection', 'energy', 'summary'
             **kwargs: 根据更新类型提供的参数
         """
-        if update_type == 'arrival':
-            # 更新到达相关统计
+        if update_type == 'arrival':  # 更新到达相关统计
             if kwargs.get('connected', False):
                 # 电池成功连接
                 self.stats['active_count'] += 1
@@ -1786,8 +1772,7 @@ class BatteryStationManager:
             # 更新当前连接率
             self.stats['current_connection_rate'] = self.stats['active_count'] / self.num_connection_points
 
-        elif update_type == 'departure':
-            # 更新离开相关统计
+        elif update_type == 'departure':  # 更新离开相关统计
             idx = kwargs.get('idx')
             final_soc = kwargs.get('final_soc', 0)
             initial_soc = kwargs.get('initial_soc', self.initial_soc[idx] if idx is not None else 0)
@@ -1840,8 +1825,7 @@ class BatteryStationManager:
             if self.stats['connected_count'] > 0:
                 self.stats['current_success_rate'] = self.stats['target_achieved_count'] / self.stats['connected_count']
 
-        elif update_type == 'waiting':
-            # 更新等待队列相关统计
+        elif update_type == 'waiting':  # 更新等待队列相关统计
             wait_time = kwargs.get('wait_time', 0)
             self.stats['total_waiting_time'] += wait_time
             self.stats['max_waiting_time'] = max(self.stats['max_waiting_time'], wait_time)
@@ -1850,8 +1834,7 @@ class BatteryStationManager:
             if self.stats['waiting_count'] > 0:
                 self.stats['avg_waiting_time'] = self.stats['total_waiting_time'] / self.stats['waiting_count']
 
-        elif update_type == 'energy':
-            # 更新能量相关统计
+        elif update_type == 'energy':  # 更新能量相关统计
             power = kwargs.get('power', 0)
             duration = kwargs.get('duration', 0.25)  # 默认15分钟，转为小时为0.25
 
@@ -1863,9 +1846,7 @@ class BatteryStationManager:
             # 更新净能量
             self.stats['net_energy'] = self.stats['total_discharge'] - self.stats['total_charge']
 
-        elif update_type == 'summary':
-            # 更新总体统计数据，通常在时间步结束时调用
-
+        elif update_type == 'summary':  # 更新总体统计数据，通常在时间步结束时调用
             # 更新当前充电功率
             total_charging_power = 0
             for idx, name in self.connected_batteries.items():
@@ -1947,18 +1928,18 @@ class BatteryStationManager:
         """
         statuses = []
 
-        # 遍历所有充电桩位置
+        # 按顺序遍历所有充电桩位置
         for i in range(self.num_connection_points):
             # 查找是否有电池连接到该充电桩
-            connected_idx = None
+            charger_idx = None
             for idx, point_id in self.battery_connection_points.items():
                 if point_id == i:
-                    connected_idx = idx
+                    charger_idx = idx
                     break
 
-            if connected_idx is not None:
+            if charger_idx is not None:
                 # 如果有电池连接，获取其SOC和功率信息
-                battery_name = self.connected_batteries.get(connected_idx)
+                battery_name = self.connected_batteries.get(charger_idx)
                 if battery_name:
                     # 获取电池状态
                     bat_name = f"Battery.{battery_name}" if not battery_name.startswith("Battery.") else battery_name
@@ -1967,14 +1948,16 @@ class BatteryStationManager:
                     if battery:
                         # 使用Battery对象的数据
                         soc = battery.soc  # 已归一化的SOC (0-1)
-                        power_ratio = -1 * battery.actual_power() / battery.max_kw  # 负值表示充电
+                        power_ratio = -1 * battery.actual_power() / battery.max_kw  # 充电功率/最大功率
                         statuses.append([soc, power_ratio])
                     else:
-                        # 电池对象不存在，返回零状态
+                        # 电池对象不存在，返回零状态——经输出检查，实际不存在这种情况
                         statuses.append([0.0, 0.0])
+                        # print("电池对象不存在，返回零状态")
                 else:
-                    # 连接索引存在但电池名称不存在，返回零状态
+                    # 连接索引存在但电池名称不存在，返回零状态——经输出检查，实际不存在这种情况
                     statuses.append([0.0, 0.0])
+                    # print("连接索引存在但电池名称不存在，返回零状态")
             else:
                 # 充电桩未连接电池，返回零状态
                 statuses.append([0.0, 0.0])
