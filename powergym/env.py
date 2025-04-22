@@ -528,99 +528,10 @@ class Env(gym.Env):
             if full:
                 info.update({'power_loss_ratio': -p / self.power_w,
                              'vol_reward': v, 'ctrl_reward': t})
-            print("奖励组成项分别为")
+
+            print(f"奖励各子项的值：p: {p}, v: {v}, t: {t}, c: {c}.")
 
             return summ, info
-
-    def step_v1(self, action: np.ndarray):
-        """Steps through one step of environment and calls DSS solver after one control action. 适配gymnasium的更新要求。
-        
-        Args:
-            action (nd.array): Array of actions for capacitors, regulators and batteries
-        
-        Returns:
-            self.wrap_obs(self.obs): 环境的下一个观察值(array)
-            reward: 执行动作获得的奖励(float)
-            terminated: 回合是否因完成条件而终止(bool)
-            truncated: 回合是否因时间限制等原因被截断(bool)
-            info: 额外信息(dict)
-        """
-        action_idx = 0
-        self.str_action = ''  # the action string to be printed at self.plot_graph()
-
-        # 控制 capacitor
-        if self.cap_num > 0:
-            statuses = action[action_idx:action_idx + self.cap_num]
-            capdiff = self.circuit.set_all_capacitor_statuses(statuses)
-            cap_statuses = {cap: status for cap, status in zip(self.circuit.capacitors.keys(), statuses)}
-            action_idx += self.cap_num
-            self.str_action += 'Cap Status:' + str(statuses)
-        else:
-            capdiff, cap_statuses = [], dict()
-
-        # 控制 regulator
-        if self.reg_num > 0:
-            tapnums = action[action_idx:action_idx + self.reg_num]
-            regdiff = self.circuit.set_all_regulator_tappings(tapnums)
-            reg_statuses = {reg: self.circuit.regulators[reg].tap for reg in self.reg_names}
-            action_idx += self.reg_num
-            self.str_action += 'Reg Tap Status:' + str(tapnums)
-        else:
-            regdiff, reg_statuses = [], dict()
-
-        # 控制 battery
-        if self.bat_num > 0:
-            states = action[action_idx:]
-            self.circuit.set_all_batteries_before_solve(states)
-            self.str_action += 'Bat Status:' + str(states)
-
-        self.circuit.dss.ActiveCircuit.Solution.Solve()
-
-        # 更新电池信息 kWh. record soc_err and discharge_err
-        if self.bat_num > 0:
-            soc_errs, dis_errs = self.circuit.set_all_batteries_after_solve()
-            bat_statuses = {name: [bat.soc, -1 * bat.actual_power() / bat.max_kw] for name, bat in
-                            self.circuit.batteries.items()}
-        else:
-            soc_errs, dis_errs, bat_statuses = [], [], dict()
-
-        # 更新时间步
-        self.t += 1
-
-        # 更新 obs
-        bus_voltages = dict()
-        for bus_name in self.all_bus_names:
-            bus_voltages[bus_name] = self.circuit.bus_voltage(bus_name)
-            bus_voltages[bus_name] = [bus_voltages[bus_name][i] for i in range(len(bus_voltages[bus_name])) if
-                                      i % 2 == 0]
-
-        self.obs['bus_voltages'] = bus_voltages
-        self.obs['cap_statuses'] = cap_statuses
-        self.obs['reg_statuses'] = reg_statuses
-        self.obs['bat_statuses'] = bat_statuses
-        self.obs['power_loss'] = - self.circuit.total_loss()[0] / self.circuit.total_power()[0]
-        self.obs['time'] = self.t
-        if self.observe_load:
-            self.obs['load_profile_t'] = self.all_load_profiles.iloc[self.t % self.horizon].to_dict()  # 截取负载曲线包括在obs中
-
-        # 为兼容gymnasium的更新要求: split 'done' into 'terminated' and 'truncated'
-        terminated = (self.t == self.horizon)  # Episode is done due to termination condition
-        truncated = False  # Not truncated due to time limit, etc.
-
-        reward, info = self.reward_func.composite_reward(capdiff, regdiff, soc_errs, dis_errs)
-
-        # noinspection PyTypeChecker
-        info.update({'av_cap_err': sum(capdiff) / (self.cap_num + 1e-10),
-                     'av_reg_err': sum(regdiff) / (self.reg_num + 1e-10),
-                     'av_dis_err': sum(dis_errs) / (self.bat_num + 1e-10),
-                     'av_soc_err': sum(soc_errs) / (self.bat_num + 1e-10),
-                     'av_soc': sum([soc for _, [soc, _] in bat_statuses.items()]) / (
-                             self.bat_num + 1e-10)})  # avoid dividing by zero
-
-        if self.wrap_observation:
-            return self.wrap_obs(self.obs), reward, terminated, truncated, info
-        else:
-            return self.obs, reward, terminated, truncated, info
 
     def step(self, action: np.ndarray):
         """
@@ -684,7 +595,7 @@ class Env(gym.Env):
                 ev_statuses = self.circuit.ev_station.get_all_statuses()
                 for idx, status in enumerate(ev_statuses):
                     # 为充电站的每个连接点创建一个虚拟电池状态
-                    bat_statuses[f'ev_{idx}'] = status
+                    bat_statuses[f'ev_{idx:03d}'] = status
         else:
             soc_errs, dis_errs, bat_statuses = [], [], dict()
 
@@ -697,6 +608,9 @@ class Env(gym.Env):
 
         # 队列处理 对于每个时段，离开先于到达。
         self.ev_station.check_departures()  # 检查离开
+
+        # 更新总功率
+        self.ev_station.update_statistics(update_type="general")
 
         # 更新 obs
         bus_voltages = dict()
@@ -725,21 +639,8 @@ class Env(gym.Env):
         if self.observe_load:
             self.obs['load_profile_t'] = self.all_load_profiles.iloc[self.t % self.horizon].to_dict()  # 截取负载曲线包括在obs中
 
-        # 检查观察值
-        if isinstance(self.obs, dict):
-            for key, value in self.obs.items():
-                # 检查值类型并相应处理
-                if isinstance(value, dict):
-                    # 如果值是字典，跳过或递归检查
-                    continue
-                elif isinstance(value, (list, np.ndarray)):
-                    # 如果是数组类型，检查是否包含极端值
-                    if np.any(np.abs(np.array(value, dtype=float)) > 1e20):
-                        print(f"极端观察值检测在key '{key}': {value}")
-                elif isinstance(value, (int, float)):
-                    # 如果是标量，直接检查
-                    if abs(value) > 1e20:
-                        print(f"极端观察值检测在key '{key}': {value}")
+        # 检查异常或偏大的obs值
+        self._check_extreme_values(self.obs)
 
         # 为兼容gymnasium的更新要求: split 'done' into 'terminated' and 'truncated'
         terminated = (self.t == self.horizon)  # Episode is done due to termination condition
@@ -760,61 +661,22 @@ class Env(gym.Env):
         else:
             return self.obs, reward, terminated, truncated, info
 
-    def reset_v0(self, load_profile_idx=0):
-        """重置环境以开启新的回合
-        Args:
-            load_profile_idx: 负载配置文件的ID号（默认: 0）
-        Returns:
-            observation: 封装后的观察值
-        """
-        # reset time
-        self.t = 0
-
-        # choose load profile
-        self.load_profile.choose_loadprofile(load_profile_idx)
-        self.all_load_profiles = self.load_profile.get_loadprofile(load_profile_idx)
-
-        # re-compile dss and reset batteries
-        self.circuit.reset()
-
-        # node voltages
-        bus_voltages = dict()
-        for bus_name in self.all_bus_names:
-            bus_voltages[bus_name] = self.circuit.bus_voltage(bus_name)
-            bus_voltages[bus_name] = [bus_voltages[bus_name][i] for i in range(len(bus_voltages[bus_name])) if
-                                      i % 2 == 0]
-        self.obs['bus_voltages'] = bus_voltages
-
-        # status of capacitor
-        cap_statuses = {name: cap.status for name, cap in self.circuit.capacitors.items()}
-        self.obs['cap_statuses'] = cap_statuses
-
-        # status of regulator
-        reg_statuses = {name: reg.tap for name, reg in self.circuit.regulators.items()}
-        self.obs['reg_statuses'] = reg_statuses
-
-        # status of battery
-        bat_statuses = {name: [bat.soc, -1 * bat.actual_power() / bat.max_kw] for name, bat in
-                        self.circuit.batteries.items()}
-        self.obs['bat_statuses'] = bat_statuses
-
-        # total power loss
-        self.obs['power_loss'] = -self.circuit.total_loss()[0] / self.circuit.total_power()[0]
-
-        # time step tracker
-        self.obs['time'] = self.t
-
-        # load for current timestep
-        if self.observe_load:
-            self.obs['load_profile_t'] = self.all_load_profiles.iloc[self.t].to_dict()
-
-        # Edge weight
-        # elf.obs['Y_matrix'] = self.circuit.edge_weight
-
-        if self.wrap_observation:  # 初始化函数内已直接设置为真
-            return self.wrap_obs(self.obs)
-        else:
-            return self.obs
+    def _check_extreme_values(self, obj, key=""):
+        """递归检查异常值"""
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                self._check_extreme_values(v, f"{key}.{k}" if key else k)
+        elif isinstance(obj, (list, np.ndarray)):
+            try:
+                arr = np.array(obj, dtype=float)
+                if np.any(~np.isfinite(arr)) or np.any(np.abs(arr) > 1e10):
+                    print(f"检测到极端值 '{key}': {obj}")
+            except (TypeError, ValueError):
+                # 无法转换为数值数组，跳过
+                pass
+        elif isinstance(obj, (int, float)):
+            if not np.isfinite(obj) or abs(obj) > 1e10:
+                print(f"检测到极端值 '{key}': {obj}")
 
     def reset(self, *, seed: int | None = None, options: dict[str, any] | None = None):
         """重置环境状态以开始新的回合，符合gymnasium的更新要求，添加了重置充电站
@@ -878,7 +740,7 @@ class Env(gym.Env):
         if hasattr(self, 'ev_station') and self.ev_station is not None:
             ev_statuses = self.ev_station.get_all_statuses()
             for idx, status in enumerate(ev_statuses):
-                bat_statuses[f'ev_{idx}'] = status
+                bat_statuses[f'ev_{idx:03d}'] = status
         self.obs['bat_statuses'] = bat_statuses
 
         # total power loss
@@ -1230,3 +1092,149 @@ class Env(gym.Env):
         for load in self.circuit.loads.keys():
             basekW[load[5:]] = self.circuit.loads[load].feature[1]  # learn: 这个feature的获取方式
         return basekW
+
+    def step_v1(self, action: np.ndarray):
+        """Steps through one step of environment and calls DSS solver after one control action. 适配gymnasium的更新要求。
+
+        Args:
+            action (nd.array): Array of actions for capacitors, regulators and batteries
+
+        Returns:
+            self.wrap_obs(self.obs): 环境的下一个观察值(array)
+            reward: 执行动作获得的奖励(float)
+            terminated: 回合是否因完成条件而终止(bool)
+            truncated: 回合是否因时间限制等原因被截断(bool)
+            info: 额外信息(dict)
+        """
+        action_idx = 0
+        self.str_action = ''  # the action string to be printed at self.plot_graph()
+
+        # 控制 capacitor
+        if self.cap_num > 0:
+            statuses = action[action_idx:action_idx + self.cap_num]
+            capdiff = self.circuit.set_all_capacitor_statuses(statuses)
+            cap_statuses = {cap: status for cap, status in zip(self.circuit.capacitors.keys(), statuses)}
+            action_idx += self.cap_num
+            self.str_action += 'Cap Status:' + str(statuses)
+        else:
+            capdiff, cap_statuses = [], dict()
+
+        # 控制 regulator
+        if self.reg_num > 0:
+            tapnums = action[action_idx:action_idx + self.reg_num]
+            regdiff = self.circuit.set_all_regulator_tappings(tapnums)
+            reg_statuses = {reg: self.circuit.regulators[reg].tap for reg in self.reg_names}
+            action_idx += self.reg_num
+            self.str_action += 'Reg Tap Status:' + str(tapnums)
+        else:
+            regdiff, reg_statuses = [], dict()
+
+        # 控制 battery
+        if self.bat_num > 0:
+            states = action[action_idx:]
+            self.circuit.set_all_batteries_before_solve(states)
+            self.str_action += 'Bat Status:' + str(states)
+
+        self.circuit.dss.ActiveCircuit.Solution.Solve()
+
+        # 更新电池信息 kWh. record soc_err and discharge_err
+        if self.bat_num > 0:
+            soc_errs, dis_errs = self.circuit.set_all_batteries_after_solve()
+            bat_statuses = {name: [bat.soc, -1 * bat.actual_power() / bat.max_kw] for name, bat in
+                            self.circuit.batteries.items()}
+        else:
+            soc_errs, dis_errs, bat_statuses = [], [], dict()
+
+        # 更新时间步
+        self.t += 1
+
+        # 更新 obs
+        bus_voltages = dict()
+        for bus_name in self.all_bus_names:
+            bus_voltages[bus_name] = self.circuit.bus_voltage(bus_name)
+            bus_voltages[bus_name] = [bus_voltages[bus_name][i] for i in range(len(bus_voltages[bus_name])) if
+                                      i % 2 == 0]
+
+        self.obs['bus_voltages'] = bus_voltages
+        self.obs['cap_statuses'] = cap_statuses
+        self.obs['reg_statuses'] = reg_statuses
+        self.obs['bat_statuses'] = bat_statuses
+        self.obs['power_loss'] = - self.circuit.total_loss()[0] / self.circuit.total_power()[0]
+        self.obs['time'] = self.t
+        if self.observe_load:
+            self.obs['load_profile_t'] = self.all_load_profiles.iloc[self.t % self.horizon].to_dict()  # 截取负载曲线包括在obs中
+
+        # 为兼容gymnasium的更新要求: split 'done' into 'terminated' and 'truncated'
+        terminated = (self.t == self.horizon)  # Episode is done due to termination condition
+        truncated = False  # Not truncated due to time limit, etc.
+
+        reward, info = self.reward_func.composite_reward(capdiff, regdiff, soc_errs, dis_errs)
+
+        # noinspection PyTypeChecker
+        info.update({'av_cap_err': sum(capdiff) / (self.cap_num + 1e-10),
+                     'av_reg_err': sum(regdiff) / (self.reg_num + 1e-10),
+                     'av_dis_err': sum(dis_errs) / (self.bat_num + 1e-10),
+                     'av_soc_err': sum(soc_errs) / (self.bat_num + 1e-10),
+                     'av_soc': sum([soc for _, [soc, _] in bat_statuses.items()]) / (
+                             self.bat_num + 1e-10)})  # avoid dividing by zero
+
+        if self.wrap_observation:
+            return self.wrap_obs(self.obs), reward, terminated, truncated, info
+        else:
+            return self.obs, reward, terminated, truncated, info
+
+    def reset_v0(self, load_profile_idx=0):
+        """重置环境以开启新的回合
+        Args:
+            load_profile_idx: 负载配置文件的ID号（默认: 0）
+        Returns:
+            observation: 封装后的观察值
+        """
+        # reset time
+        self.t = 0
+
+        # choose load profile
+        self.load_profile.choose_loadprofile(load_profile_idx)
+        self.all_load_profiles = self.load_profile.get_loadprofile(load_profile_idx)
+
+        # re-compile dss and reset batteries
+        self.circuit.reset()
+
+        # node voltages
+        bus_voltages = dict()
+        for bus_name in self.all_bus_names:
+            bus_voltages[bus_name] = self.circuit.bus_voltage(bus_name)
+            bus_voltages[bus_name] = [bus_voltages[bus_name][i] for i in range(len(bus_voltages[bus_name])) if
+                                      i % 2 == 0]
+        self.obs['bus_voltages'] = bus_voltages
+
+        # status of capacitor
+        cap_statuses = {name: cap.status for name, cap in self.circuit.capacitors.items()}
+        self.obs['cap_statuses'] = cap_statuses
+
+        # status of regulator
+        reg_statuses = {name: reg.tap for name, reg in self.circuit.regulators.items()}
+        self.obs['reg_statuses'] = reg_statuses
+
+        # status of battery
+        bat_statuses = {name: [bat.soc, -1 * bat.actual_power() / bat.max_kw] for name, bat in
+                        self.circuit.batteries.items()}
+        self.obs['bat_statuses'] = bat_statuses
+
+        # total power loss
+        self.obs['power_loss'] = -self.circuit.total_loss()[0] / self.circuit.total_power()[0]
+
+        # time step tracker
+        self.obs['time'] = self.t
+
+        # load for current timestep
+        if self.observe_load:
+            self.obs['load_profile_t'] = self.all_load_profiles.iloc[self.t].to_dict()
+
+        # Edge weight
+        # elf.obs['Y_matrix'] = self.circuit.edge_weight
+
+        if self.wrap_observation:  # 初始化函数内已直接设置为真
+            return self.wrap_obs(self.obs)
+        else:
+            return self.obs

@@ -988,7 +988,7 @@ class Battery(Node):
         self.initial_soc = self.soc  # initial soc
         self.duration = self.dss.ActiveCircuit.Solution.StepSize / 3600.0  # time step in hour
         if self.duration < 1e-5: self.duration = 1.0
-        self.enabled = True  # 默认启用 Todo: 尚未添加相关逻辑
+        self.enabled = True  # 默认启用 Todo: 添加相关逻辑
 
         # battery states
         self.bat_act_num = bat_act_num
@@ -1428,10 +1428,12 @@ def load_ev_from_csv(csv_path):
         if 'priority' in df.columns:
             result['priority'] = df['priority'].tolist()
 
-        # 进行数据验证
+        # 进行数据校验
         for i, (arrival, departure) in enumerate(zip(result['arrival'], result['departure'])):
-            if arrival >= departure:
-                print(f"警告: 第{i+1}行的到达时间晚于或等于离开时间")
+            if arrival == departure:
+                print(f"警告: 第{i+1}行的到达时间等于离开时间")
+            elif arrival > departure:
+                print(f"警告: 第{i+1}行的到达时间晚于离开时间")
 
         for i, soc in enumerate(result['initial_soc']):
             if not 0 <= soc <= 1:
@@ -1448,13 +1450,8 @@ def load_ev_from_csv(csv_path):
         return None
 
 
-
 class BatteryStationManager:
     """EV电池排队管理器，处理EV电池的接入/断开和排队逻辑
-        Todo:
-            1. 修改以match整个的Env的step和reset过程
-            2. 一些属性及相关使用待完善或添加
-                2.1. 将接入信息表达到状态空间
 
     Attributes:
         circuit (Circuits): 电力系统仿真对象
@@ -1567,7 +1564,7 @@ class BatteryStationManager:
         # 性能统计
         self.stats = {
             # 基本连接统计
-            'connected_count': 0,  # 已连接的EV电池数【原本计划用于统计已连接过的EV数，在断开时计数】
+            'connected_count': 0,  # 已连接的EV电池数【原计划用于统计已连接过的EV数，在断开时计数】
             'rejected_count': 0,  # 未能连接的EV电池数
             'waiting_count': 0,  # 进入等待队列的EV电池数
             'active_count': 0,  # 当前连接的EV电池数
@@ -1578,11 +1575,11 @@ class BatteryStationManager:
             'net_energy': 0,  # 净能量交换(kWh)
 
             # 充电满足度统计
-            'completed_count': 0,  # 完成充电的电池数【原本计划用于统计满足需求的EV数】
-            'completed_soc': 0,  # 完成充电的电池SOC达成率总和
-            'avg_completed_soc': 0,  # 平均SOC达成率
-            'charge_satisfaction_ratio': 0,  # 各EV充电满足率之和
-            'target_achieved_count': 0,  # 达到目标SOC的电池数
+            'completed_count': 0,  # 完成充电的EV电池数【原计划用于统计满足需求的EV数】
+            'completed_soc': 0,  # 完成充电的EV电池的SOC增加总和
+            'avg_completed_soc': 0,  # 完成充电的EV电池的平均增加的SOC
+            'charge_satisfaction_ratio': 0,  # EV电池能量满足率之和（单个EV电池的满足率离开时的充电能量比所需的充电能量）
+            'target_achieved_count': 0,  # 达到目标SOC（能量满足率为1，完全满足）的EV电池数
             'avg_target_achieved': 0,  # 充电满足率平均值(满足率之和/总连接数)
 
             # 服务质量统计
@@ -1596,7 +1593,7 @@ class BatteryStationManager:
 
             # 实时指标
             'current_connection_rate': 0,  # 当前连接率(当前连接数/总连接点数)
-            'current_charging_power': 0,  # 当前总充电功率(电池状态的actual_power累加)
+            'current_charging_power': 0,  # 当前总充电功率(电池状态的charging_power累加)
             'current_success_rate': 0  # 当前服务成功率(完全满足数/总连接数)
         }
 
@@ -1805,7 +1802,7 @@ class BatteryStationManager:
 
             # 更新完成充电统计 Checked
             self.stats['completed_count'] += 1
-            self.stats['completed_soc'] += final_soc
+            self.stats['completed_soc'] += final_soc - initial_soc
 
             # 更新目标达成率 - 充电进度/目标进度
             if is_target_achieved:
