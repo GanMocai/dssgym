@@ -27,6 +27,8 @@ import itertools
 import os
 import multiprocessing as mp
 
+import datetime
+
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Argument Parser')
@@ -41,11 +43,11 @@ def parse_arguments():
     parser.add_argument('--num_workers', type=int, default=3, metavar='N',
                         help='number of parallel processes')
     parser.add_argument('--use_plot', type=lambda x: str(x).lower() == 'true', default=False)
-    parser.add_argument('--plot_path', type=str, default=r'plots\ppo_model', )
+    parser.add_argument('--plot_path', type=str, default=r'plots', )
     parser.add_argument('--do_testing', type=lambda x: str(x).lower() == 'true', default=False)
-    parser.add_argument('--model_path', type=str, default=r'models\ppo_model',  # 纯粹使用该相对路径时，实际会转到对应dss文件所在目录下
+    parser.add_argument('--model_path', type=str, default=r'model',  # 纯粹使用该相对路径时，实际会转到对应dss文件所在目录下
                         help="path to save or load the model")
-    parser.add_argument('--learning_rate', type=float, default=3e-6,  # 3e-4
+    parser.add_argument('--learning_rate', type=float, default=3e-4,  # 3e-4
                         help="learning rate for PPO")
     parser.add_argument('--n_steps', type=int, default=2048,
                         help="number of steps to run for each environment per update")
@@ -96,7 +98,22 @@ def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, pri
         print_step: 是否打印每步信息
     """
     cwd = os.getcwd()
-    print('当前工作目录:', cwd)  # 工作目录在powergym
+    print('当前工作目录:', cwd)  # 默认运行时工作目录在powergym
+
+    # 创建以时间戳和环境名命名的文件夹
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    save_dir = f"results_{timestamp}_{args.env_name}"
+    save_path = os.path.join(cwd, save_dir)
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+
+    # 在文件夹中创建保存模型和图像子目录
+    model_dir = os.path.join(save_path, args.model_path)
+    plot_dir = os.path.join(save_path, args.plot_path)
+    if not os.path.exists(model_dir):
+        os.makedirs(model_dir)
+    if use_plot and not os.path.exists(plot_dir):
+        os.makedirs(plot_dir)
 
     # 获取环境
     env = make_env(args.env_name, worker_idx=worker_idx)
@@ -109,7 +126,7 @@ def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, pri
         print('-' * 80)
 
     # 创建回调
-    reward_monitor = RewardMonitorCallback(log_freq=1)  # 每10步记录一次
+    reward_monitor = RewardMonitorCallback(log_freq=100, output_path=f'{save_path}/rewards_in_training')  # 每100步记录一次
 
     # 创建PPO模型并显式设置随机种子
     model = PPO("MlpPolicy", env,  # 默认策略网络，两层隐藏层的全连接网络，每层包含64个神经元
@@ -123,37 +140,133 @@ def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, pri
     model.learn(total_timesteps=args.num_steps, callback=reward_monitor)  # 使用回调进行训练
 
     # 保存模型
-    model_path = args.model_path
+    model_path = os.path.join(model_dir, "ppo_model")
     if worker_idx is not None:
         # 为并行工作进程添加唯一标识符
         model_path = f"{model_path}_{worker_idx}"
 
-    model_path = os.path.join(cwd, model_path)  # 统一一下目录
-
-    model_dir = os.path.dirname(model_path)
-    if model_dir and not os.path.exists(model_dir):
-        os.makedirs(model_dir)
-    model.save(model_path)  # 根据实际情况，好像不必额外检查目录是否存在，会自动创建？
+    model.save(model_path)  # 根据实际情况，好像不必检查目录是否存在，会自动创建
     print(f"模型已保存至 {model_path}")
+
+    # 准备数据记录文件
+    rewards_file = os.path.join(save_path, "rewards.csv")
+    voltages_file = os.path.join(save_path, "voltages.csv")
+    powers_file = os.path.join(save_path, "powers.csv")
+    ev_stats_file = os.path.join(save_path, "ev_stats.csv")
+    node_powers_file = os.path.join(save_path, "node_powers.csv")
+
+    with open(rewards_file, 'w', encoding='utf-8') as f:
+        f.write("step,总奖励值,电压奖励,功率损耗奖励,控制奖励,完成率奖励\n")
+
+    with open(voltages_file, 'w', encoding='utf-8') as f:
+        header = "step"
+        for bus_name in env.all_bus_names:
+            header += f",{bus_name}"
+        f.write(header + "\n")
+
+    with open(powers_file, 'w', encoding='utf-8') as f:
+        f.write("step,P,Q,PowerLoss,PowerFactor\n")
+
+    with open(ev_stats_file, 'w', encoding='utf-8') as f:
+        f.write("step,连接率,充电功率,成功率,完成率\n")
+
+    # 初始化节点功率记录文件
+    with open(node_powers_file, 'w') as f:
+        header = "step"
+        for bus_name in env.all_bus_names:
+            header += f",{bus_name}_P,{bus_name}_Q"  # 每个节点记录有功功率P和无功功率Q
+        f.write(header + "\n")
 
     # 评估模型性能
     # obs = env.reset(load_profile_idx=load_profile_idx)
     obs, info = env.reset(seed=args.seed, options={'load_profile_idx': load_profile_idx})  # 显式传递种子
 
-    # 创建保存图像的目录
-    if use_plot and not os.path.exists(os.path.join(cwd, args.plot_path)):
-        os.makedirs(os.path.join(cwd, args.plot_path))
-
     episode_reward = 0.0
     for i in range(env.horizon):
         action, _ = model.predict(obs, deterministic=True)
-        # obs, reward, done, info = env.step(action)
-        # 上方改成下方两行，以适配API要求
         obs, reward, terminated, truncated, info = env.step(action)
         done = terminated or truncated
         episode_reward += reward
         print(worker_idx, i, reward)
 
+        # 记录奖励函数详情
+        with open(rewards_file, 'a') as f:
+            # 提取奖励分量
+            v_reward = info.get('Voltage_reward', 0)  # 电压奖励
+            p_reward = info.get('PowerLoss_reward', 0)  # 功率损耗奖励
+            t_reward = info.get('Control_reward', 0)  # 控制奖励
+            c_reward = info.get('Completion_reward', 0)  # 完成率奖励
+
+            f.write(f"{i},{reward},{v_reward},{p_reward},{t_reward},{c_reward}\n")
+
+        # 记录各节点电压——无法直接通过obs进行，step传出的obs是展为数组的
+        with open(voltages_file, 'a') as f:
+            line = f"{i}"
+            for bus_name in env.all_bus_names:
+                # 直接使用环境的circuit对象获取电压数据，类似于环境内部的实现
+                bus_voltage = env.circuit.bus_voltage(bus_name)
+                # 只保留实部值(偶数索引)
+                bus_voltage_real = [bus_voltage[j] for j in range(len(bus_voltage)) if j % 2 == 0]
+                # 计算平均电压值
+                voltage_value = sum(bus_voltage_real) / len(bus_voltage_real) if bus_voltage_real else 0
+                line += f",{voltage_value}"
+            f.write(line + "\n")
+
+        # 记录系统功率
+        with open(powers_file, 'a') as f:
+            # 获取系统功率信息
+            active_power = env.circuit.total_power()[0]
+            reactive_power = env.circuit.total_power()[1]
+            power_loss = env.circuit.total_loss()[0]
+            # 计算功率因数
+            power_factor = active_power / (
+                np.sqrt(active_power ** 2 + reactive_power ** 2)) if active_power != 0 or reactive_power != 0 else 0
+
+            f.write(f"{i},{active_power},{reactive_power},{power_loss},{power_factor}\n")
+
+        # 记录EV充电站统计数据
+        with open(ev_stats_file, 'a') as f:
+            # 直接从环境获取EV数据，而不是从obs获取
+            connection_rate = env.obs.get('ev_connection_rate', 0) if hasattr(env, 'obs') else 0
+            charging_power = env.obs.get('ev_charging_power', 0) if hasattr(env, 'obs') else 0
+            success_rate = env.obs.get('ev_success_rate', 0) if hasattr(env, 'obs') else 0
+            completion_rate = env.obs.get('com', 0) if hasattr(env, 'obs') else 0
+
+            f.write(f"{i},{connection_rate},{charging_power},{success_rate},{completion_rate}\n")
+
+        # 记录各节点的功率
+        with open(node_powers_file, 'a') as f:
+            line = f"{i}"
+            # 遍历所有总线，获取它们的功率
+            for bus_name in env.all_bus_names:
+                # 获取节点功率信息，如果不可用则为0
+                try:
+                    # 设置总线为活动总线
+                    env.circuit.dss.ActiveCircuit.SetActiveBus(bus_name)
+                    # 获取电压和电流
+                    voltages = env.circuit.dss.ActiveCircuit.ActiveBus.Voltages
+                    currents = env.circuit.dss.ActiveCircuit.ActiveBus.Isc
+
+                    # 计算复功率：S = V * I* (电压乘以电流的共轭)
+                    active_power = 0
+                    reactive_power = 0
+
+                    # 确保电压和电流数组长度相同且不为空
+                    if voltages is not None and currents is not None and len(voltages) == len(currents):
+                        for j in range(0, len(voltages), 2):  # 以2为步长遍历
+                            if j + 1 < len(voltages):
+                                # 实部计算有功功率，虚部计算无功功率
+                                v_real, v_imag = voltages[j], voltages[j + 1]
+                                i_real, i_imag = currents[j], currents[j + 1]
+                                # P = V_real*I_real + V_imag*I_imag
+                                active_power += v_real * i_real + v_imag * i_imag
+                                # Q = V_imag*I_real - V_real*I_imag
+                                reactive_power += v_imag * i_real - v_real * i_imag
+                except Exception as e:
+                    print(f"获取节点 {bus_name} 功率时出错: {e}")
+                    active_power, reactive_power = 0, 0
+                line += f",{active_power},{reactive_power}"
+            f.write(line + "\n")
         if print_step:
             print('\nStep:{}\n'.format(i))
             print('Action:', action)
@@ -163,7 +276,7 @@ def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, pri
             # node_bound参数用于决定为具有多相的节点绘制最大或最小节点电压
             fig, _ = env.plot_graph()
             fig.tight_layout(pad=0.1)
-            fig.savefig(os.path.join(cwd, args.plot_path, 'node_voltage_' + str(i).zfill(4) + '.png'))
+            fig.savefig(os.path.join(plot_dir, 'node_voltage_' + str(i).zfill(4) + '.png'))
             plt.close()
 
     print(f'load_profile: {load_profile_idx}, episode_reward: {episode_reward}')
@@ -172,24 +285,24 @@ def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, pri
     if use_plot:
         fig, _ = env.plot_graph(show_voltages=False)
         fig.tight_layout(pad=0.1)
-        fig.savefig(os.path.join(cwd, args.plot_path, 'system_layout.pdf'))
+        fig.savefig(os.path.join(plot_dir, 'system_layout.pdf'))
 
         # 改进GIF动画生成
         images = []
-        filenames = sorted(glob.glob(os.path.join(cwd, args.plot_path, "node_voltage_*.png")))
+        filenames = sorted(glob.glob(os.path.join(plot_dir, "node_voltage_*.png")))
         for filename in filenames:
             images.append(imageio.imread(filename))
 
         if images:  # 确保有图像才生成GIF
             # 使用更好的参数设置来确保动画效果
             imageio.mimsave(
-                os.path.join(cwd, args.plot_path, 'node_voltage.gif'),
+                os.path.join(plot_dir, 'node_voltage.gif'),
                 images,
                 fps=2,  # 提高帧率使动画更流畅
                 loop=0,  # 0表示无限循环
                 duration=500  # 每帧显示500毫秒
             )
-            print(f"已生成GIF动画，包含{len(images)}帧")
+            print(f"已生成GIF动画，包含{len(images)}步")
 
 
 def run_parallel_ppo_agent(args):

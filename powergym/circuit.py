@@ -1584,7 +1584,7 @@ class BatteryStationManager:
             'current_success_rate': 0  # 当前服务成功率(完全满足数/总连接数)
         }
 
-    def check_arrivals(self) -> None:
+    def check_arrivals(self, print_details=False) -> None:
         """检查并处理当前时刻到达的电池。
 
         当电池到达时，根据接入点可用性进行处理：
@@ -1619,15 +1619,17 @@ class BatteryStationManager:
                     self.battery_connection_points_history[idx] = connection_point_id
                     # 更新统计数据
                     self.update_statistics('arrival', connected=True)
-                    print(f"时间步 {self.current_step} 执行前: 电池 {name} 已接入")
+                    if print_details:
+                        print(f"时间步 {self.current_step} 执行前: 电池 {name} 已接入")
                 else:
                     # 无接入点可用，加入等待队列
                     self.waiting_queue.append((idx, self.current_step))
                     # 更新等待队列统计
                     self.update_statistics('arrival', waiting=True)
-                    print(f"时间步 {self.current_step} 执行前: 电池 {self.battery_names[idx]} 加入等待队列")
+                    if print_details:
+                        print(f"时间步 {self.current_step} 执行前: 电池 {self.battery_names[idx]} 加入等待队列")
 
-    def check_departures(self) -> None:
+    def check_departures(self, print_details=True) -> None:
         """检查当前时刻离开的已连接电池并断开连接。
 
         检查电池是否达到目标SOC（达到则提前断开，并更新连接点可用信息）。
@@ -1652,8 +1654,8 @@ class BatteryStationManager:
                                        final_soc=bat_status['soc_percent'] / 100,
                                        is_target_achieved=True,
                                        arrival_time=self.arrival[idx])
-                print(
-                    f"时间步 {self.current_step} 执行前: 电池 {name} 已充满 (SOC: {bat_status['soc_percent']:.1f}%)，离开")
+                if print_details:
+                    print(f"时间步 {self.current_step} 执行前: 电池 {name} 已充满 (SOC: {bat_status['soc_percent']:.1f}%)，离开")
 
                 # # Deprecated: 相应更新连接点可用信息——添加电池-桩的对应关系后已经不需要
                 # # 1. 充满时间正好和离开时间一致则不需要更新信息
@@ -1683,8 +1685,8 @@ class BatteryStationManager:
                 # 断开连接
                 self.controller.disconnect_battery(name)
                 disconnected_indices.append(idx)
-                print(
-                    f"时间步 {self.current_step}: 电池 {name} 已离开，当前SOC: {final_soc * 100:.1f}%，能量满足率: {target_ratio * 100:.1f}%")
+                if print_details:
+                    print(f"时间步 {self.current_step}: 电池 {name} 已离开，当前SOC: {final_soc * 100:.1f}%，能量满足率: {target_ratio * 100:.1f}%")
 
         # 从已连接电池列表中移除断开的电池
         for idx in disconnected_indices:

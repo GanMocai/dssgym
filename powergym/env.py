@@ -233,13 +233,14 @@ class ActionSpace:
 
     Attributes:
         bat_num (int): 电池的总数量
+        sto_num (int): 储能电池的数量
         bat_act_num (int): 每个电池控制动作的数量
         space (gym.spaces): 来自gym的空间对象
 
     note: 如果使用离散电池，space是MultiDiscrete类型；否则，space是Box类型
     """
 
-    def __init__(self, bat_num, bat_act_num):
+    def __init__(self, bat_num, sto_num, bat_act_num):
         self.bat_num = bat_num
         self.bat_act_num = bat_act_num
 
@@ -248,7 +249,13 @@ class ActionSpace:
             self.space = gym.spaces.MultiDiscrete([self.bat_act_num] * self.bat_num)
         else:
             # 连续
-            self.space = gym.spaces.Box(low=0, high=1, shape=(self.bat_num,), dtype=np.float32)  # To avoid or confine V2G, change it.
+            # self.space = gym.spaces.Box(low=-1, high=1, shape=(self.bat_num,),
+            #                             dtype=np.float32)  # To avoid or confine V2G, change it.
+            # 修改以使EV电池不V2G
+            low = np.zeros(self.bat_num)
+            low[:sto_num] = -1.0
+            self.space = gym.spaces.Box(low=low, high=1.0, dtype=np.float32)
+
 
     def sample(self) -> np.ndarray:
         """返回从动作空间采样的一个随机动作.
@@ -379,6 +386,7 @@ class Env(gym.Env):
         self.cap_num = len(self.cap_names)
         self.reg_num = len(self.reg_names)
         self.bat_num = len(self.bat_names)  # 获取储能电池数量
+        self.sto_num = self.bat_num # 记录储能电池的数量
 
         # Note: 添加内容
         self.con_num = info['num_chargers']  # 获取充电桩数量
@@ -406,7 +414,7 @@ class Env(gym.Env):
         # 创建 action space 和 observation space
         # self.ActionSpace = ActionSpace((self.cap_num, self.reg_num, self.bat_num),
         #                                (self.reg_act_num, self.bat_act_num))
-        self.ActionSpace = ActionSpace(self.bat_num, self.bat_act_num)  # 修改为仅控制电池
+        self.ActionSpace = ActionSpace(self.bat_num, self.sto_num, self.bat_act_num)  # 修改为仅控制电池
         self.action_space = self.ActionSpace.space  # 标准化接口
         self.str_action = None  # 动作字符串，用于在self.plot_graph()打印
         self.reset_obs_space()
@@ -523,16 +531,16 @@ class Env(gym.Env):
             v, vio_nodes = self.voltage_reward(record_node)
             t = self.ctrl_reward(cd, rd, soc, dis)
             c = self.completion_reward()  # 添加充电完成率奖励
-            summ = p + v + t + c
+            total_reward = p + v + t + c
 
             info = dict() if not record_node else {'violated_nodes': vio_nodes}
             if full:
                 info.update({'power_loss_ratio': -p / self.power_w,
-                             'vol_reward': v, 'ctrl_reward': t})
+                             'PowerLoss_reward': p, 'Voltage_reward': v, 'Control_reward': t, 'Completion_reward': c})
 
             print(f"奖励各子项的值：p: {p}, v: {v}, t: {t}, c: {c}.")
 
-            return summ, info
+            return total_reward, info
 
     def step(self, action: np.ndarray):
         """
@@ -611,7 +619,10 @@ class Env(gym.Env):
         self.ev_station.check_departures()  # 检查离开
 
         # 更新总功率
-        self.ev_station.update_statistics(update_type="general")
+        self.ev_station.update_statistics(update_type="summary")
+
+        # 更新功率调度方案记录
+        self.ev_station.update_schedule()
 
         # 更新 obs
         bus_voltages = dict()
@@ -649,6 +660,7 @@ class Env(gym.Env):
         terminated = (self.t == self.horizon)  # Episode is done due to termination condition
         truncated = False  # Not truncated due to time limit, etc.
 
+        # 计算奖励函数并返回额外信息
         reward, info = self.reward_func.composite_reward(capdiff, regdiff, soc_errs, dis_errs)
 
         # noinspection PyTypeChecker

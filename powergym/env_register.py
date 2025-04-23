@@ -341,14 +341,14 @@ for env in _ENV_INFO.keys():
     _ENV_INFO[env]['cap_w'] = 0.0
     # 暂时不考虑由SOC构成的奖励项
     _ENV_INFO[env]['soc_w'] = 0.0
-    # 暂时不考虑不放电的限制
+    # 暂时不考虑对放电的限制
     _ENV_INFO[env]['dis_w'] = 0.0
     # 在info中添加充电站信息，包括母线、连接点数量
     _ENV_INFO[env].update(_STATION_INFO[sys])
     # 在info中ev 充电需求队列文件路径
     _ENV_INFO[env].update(_EV_INFO[sys])
     # 在 info 中添加充电站相关充电完成率的权重
-    _ENV_INFO[env]['com_w'] = 1.0
+    _ENV_INFO[env]['com_w'] = 10
 
 
 # %% 函数
