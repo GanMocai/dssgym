@@ -1559,7 +1559,7 @@ class BatteryStationManager:
             # 能量统计
             'total_discharge': 0,  # 总放电量(kWh)
             'total_charge': 0,  # 总充电量(kWh)
-            'net_energy': 0,  # 净能量交换(kWh)
+            'net_energy': 0,  # 净能量交换(kWh)——干净获取能量
 
             # 充电满足度统计
             'completed_count': 0,  # 完成充电的EV电池数【原计划用于统计满足需求的EV数】
@@ -1846,7 +1846,7 @@ class BatteryStationManager:
                 self.stats['total_charge'] += abs(power) * duration
 
             # 更新净能量
-            self.stats['net_energy'] = self.stats['total_discharge'] - self.stats['total_charge']
+            self.stats['net_energy'] = self.stats['total_charge'] - self.stats['total_discharge']
 
         elif update_type == 'summary':  # 更新总体统计数据，通常在时间步结束时调用
             # 更新当前充电功率
@@ -1869,6 +1869,27 @@ class BatteryStationManager:
                 # total_charging_power += bat_status['charging_power']
         # 更新当前充电功率
         # self.stats['current_charging_power'] = total_charging_power
+
+    def export_schedule(self, output_path=None):
+        """
+        导出电池功率调度记录到 CSV 文件
+
+        Arg:
+            output_path (str): 输出文件名，缺省时使用 "schedule.csv"
+
+        Returns:
+            bool: 是否成功导出
+        """
+        try:
+            col_names = [f"step_{i}" for i in range(self.total_steps)]
+            df = pd.DataFrame(self.schedule, index=self.battery_names, columns=col_names)
+            output_file = output_path if output_path else "schedule.csv"
+            df.to_csv(output_file, index=True)
+            print(f"调度记录已导出到 {output_file}")
+            return True
+        except Exception as e:
+            print(f"导出调度记录失败: {e}")
+            return False
 
     def update_before_solve(self):
         """在OpenDSS求解前更新，处理电池到达、队列和离开
@@ -2051,25 +2072,23 @@ class BatteryStationManager:
         print("BatteryStationManager已重置")
         return True
 
-    def get_statistics(self):
+    def get_statistics(self, schedule):
         """计算并返回整体的性能统计"""
         # 计算已连接过的电池数量
-        connected_count = np.count_nonzero(self.schedule.sum(axis=1))
-
-        # Note: 满足充电需求的电池数量改为实时计算，并放置于 check_departures 中
+        connected_count = np.count_nonzero(schedule.sum(axis=1))
 
         # 计算总放电量和充电量
-        discharge_mask = self.schedule > 0
-        charge_mask = self.schedule < 0
-        total_discharge = self.schedule[discharge_mask].sum() * 0.25  # 每15分钟乘以0.25小时
-        total_charge = -self.schedule[charge_mask].sum() * 0.25
+        discharge_mask = schedule > 0
+        charge_mask = schedule < 0
+        total_discharge = schedule[discharge_mask].sum() * 0.25  # 每15分钟乘以0.25小时
+        total_charge = -schedule[charge_mask].sum() * 0.25
 
-        # 更新统计信息
+        # 根据schedule计算统计信息
         self.stats.update({
             'connected_count': connected_count,
             'total_discharge': total_discharge,
             'total_charge': total_charge,
-            'net_energy': total_discharge - total_charge
+            'net_energy': total_charge - total_discharge
         })
 
         # 打印性能指标
@@ -2077,7 +2096,7 @@ class BatteryStationManager:
         print(f"    接入的电池数量: {int(connected_count)}")
         print(f"    总放电量: {total_discharge:.2f} kWh")
         print(f"    总充电量: {total_charge:.2f} kWh")
-        print(f"    净能量支持: {total_discharge - total_charge:.2f} kWh")
+        print(f"    净能量: {total_discharge - total_charge:.2f} kWh")
         print(f"    被拒绝的电池数量: {self.stats['rejected_count']}")
 
         return self.stats

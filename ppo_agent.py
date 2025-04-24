@@ -251,7 +251,7 @@ def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, pri
                     # 获取该总线的名称以便于查找连接的设备
                     bus_name_dss = env.circuit.dss.ActiveCircuit.ActiveBus.Name
 
-                    # 获取连接到该总线的负荷
+                    # 获取连接到该总线的负荷——通过kW和kVar获取得到的是基值而非实际值
                     if env.circuit.dss.ActiveCircuit.Loads.First != 0:
                         while True:
                             # 使用OpenDSS命令获取负荷连接的总线
@@ -261,13 +261,20 @@ def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, pri
                             # 检查负载是否连接到当前总线
                             # load_bus = env.circuit.dss.ActiveCircuit.Loads.Bus1.split('.')[0]
                             if load_bus.lower() == bus_name_dss.lower():
-                                # 累加功率
-                                active_power -= env.circuit.dss.ActiveCircuit.Loads.kW  # 负号表示负载消耗
-                                reactive_power -= env.circuit.dss.ActiveCircuit.Loads.kvar
+                                # 设置该负荷为活动元件
+                                env.circuit.dss.ActiveCircuit.SetActiveElement(f"Load.{load_name}")
+                                # 获取负荷的功率
+                                powers = env.circuit.dss.ActiveCircuit.ActiveCktElement.Powers
+                                # 累加功率（偶数索引是P，奇数索引是Q）
+                                if powers is not None and len(powers) > 0:
+                                    for j in range(0, len(powers), 2):
+                                        active_power -= powers[j]  # 负载消耗为负
+                                        if j + 1 < len(powers):
+                                            reactive_power -= powers[j + 1]
                             if env.circuit.dss.ActiveCircuit.Loads.Next == 0:  # 迭完了
                                 break
 
-                    # 获取连接到该总线的电源（其实还包括电池了）
+                    # 获取连接到该总线的电源（其实还包括电池）——在model=1且未设置调度曲线时，kW和实际功率应该一致
                     if env.circuit.dss.ActiveCircuit.Generators.First != 0:
                         while True:
                             # 使用OpenDSS命令获取负荷连接的总线
@@ -301,6 +308,9 @@ def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, pri
             fig.tight_layout(pad=0.1)
             fig.savefig(os.path.join(plot_dir, 'node_voltage_' + str(i).zfill(4) + '.png'))
             plt.close()
+
+    # 导出schedule为csv
+    env.ev_station.export_schedule(output_path=save_path+r'\schedule.csv')
 
     print(f'load_profile: {load_profile_idx}, episode_reward: {episode_reward}')
 
