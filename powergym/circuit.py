@@ -149,9 +149,9 @@ class Circuits:
                     if full_name in self.batteries:
                         batt = self.batteries[full_name]
                         kw = batt.state_projection(nkws_or_states[idx_in_nkws_or_states])
-                        kvar = kw / batt.pf
+                        kvar = kw * np.tan(np.arccos(batt.pf))
                         bat2kwkvar[batt.name[8:]] = (kw, kvar)
-        # # 原设置电池对象
+        # # 原设置电池对象——把AI带歪了……
         # bat2kwkvar = dict()
         # for i, bat in enumerate(self.batteries.keys()):  # 索引，key
         #     batt = self.batteries[bat]
@@ -169,7 +169,7 @@ class Circuits:
                     kw, kvar = bat2kwkvar[dssGen.Name]
                     dssGen.kW = kw
                     dssGen.kvar = kvar
-                    print(dssGen.Name, dssGen.kW, dssGen.kvar)
+                    print(f'已在 set_all_batteries_before_solve 中设置 {dssGen.Name} 有无功功率为 {dssGen.kW}, {dssGen.kvar}')
                 if dssGen.Next == 0:  # 没有下一个这类对象
                     break
 

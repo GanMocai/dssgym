@@ -250,11 +250,11 @@ class ActionSpace:
         else:
             # 连续
             # self.space = gym.spaces.Box(low=-1, high=1, shape=(self.bat_num,),
-            #                             dtype=np.float32)  # To avoid or confine V2G, change it.
+            #                             dtype=np.float32)  # To avoid or confine V2G, 改变 high，因为是发电机，然后我懒得改.
             # 修改以使EV电池不V2G
-            low = np.zeros(self.bat_num)
-            low[:sto_num] = -1.0
-            self.space = gym.spaces.Box(low=low, high=1.0, dtype=np.float32)
+            high = np.zeros(self.bat_num)
+            high[:sto_num] = 1.0
+            self.space = gym.spaces.Box(low=-1.0, high=1.0, dtype=np.float32)
 
 
     def sample(self) -> np.ndarray:
