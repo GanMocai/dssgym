@@ -254,7 +254,7 @@ class ActionSpace:
             # 修改以使EV电池不V2G
             high = np.zeros(self.bat_num)
             high[:sto_num] = 1.0
-            self.space = gym.spaces.Box(low=-1.0, high=1.0, dtype=np.float32)
+            self.space = gym.spaces.Box(low=-1.0, high=high, dtype=np.float32)
 
 
     def sample(self) -> np.ndarray:
@@ -400,7 +400,7 @@ class Env(gym.Env):
         self.ev_station = BatteryStationManager(self.circuit, self.station_bus, self.con_num,
                                                 self.ev['arrival'],self.ev['departure'],
                                                 self.ev['max_power'] ,self.ev['initial_soc'], self.ev['target_soc'],
-                                                self.ev['capacity'])  # Todo: 完善时序模型的接入
+                                                self.ev['capacity'])
         self.circuit.ev_station = self.ev_station  # 将充电站添加到电路引用
 
         # 检查参数范围
@@ -450,7 +450,7 @@ class Env(gym.Env):
             print(f"电池边界维度: {self.bat_num * 2}")
 
             # 添加充电站实时指标维度
-            low, high = low + [0.0, 0.0, 0.0, 0.0], high + [1.0, float('inf'), 1.0, 1.0]  # 连接率,充电功率,成功率,完成率（成功率）
+            low, high = low + [0.0, 0.0, 0.0, 0.0], high + [1.0, float('inf'), 1.0, float('inf')]  # 连接率,充电功率,成功率,平均能量满足率
             print(f"EV station metrics dimension: 4")
 
             if observe_load:
@@ -487,7 +487,8 @@ class Env(gym.Env):
             self.reg_w = info['reg_w']
             self.soc_w = info['soc_w']
             self.dis_w = info['dis_w']
-            self.com_w = info['com_w']
+            self.com_w = info['completion_w']
+            self.energy_w = info['energy_w']
 
         def powerloss_reward(self):
             # Penalty for power loss of entire system at one time step
@@ -510,8 +511,12 @@ class Env(gym.Env):
             return -cost
 
         def completion_reward(self):
-            # 完成率奖励时间步
-            return max(0.0, self.env.obs['com']) * self.com_w
+            # 完成率奖励
+            return max(0.0, self.env.obs['ev_success_rate']) * self.com_w
+
+        def energy_reward(self):
+            # 能量满足率奖励
+            return self.env.obs['avg_target_achieved'] * self.energy_w
 
         def voltage_reward(self, record_node=False):
             # Penalty for node voltage being out of [0.95, 1.05] range
@@ -531,14 +536,15 @@ class Env(gym.Env):
             v, vio_nodes = self.voltage_reward(record_node)
             t = self.ctrl_reward(cd, rd, soc, dis)
             c = self.completion_reward()  # 添加充电完成率奖励
-            total_reward = p + v + t + c
+            e = self.energy_reward()
+            total_reward = p + v + t + c + e
 
             info = dict() if not record_node else {'violated_nodes': vio_nodes}
             if full:
                 info.update({'power_loss_ratio': -p / self.power_w,
-                             'PowerLoss_reward': p, 'Voltage_reward': v, 'Control_reward': t, 'Completion_reward': c})
+                             'PowerLoss_reward': p, 'Voltage_reward': v, 'Control_reward': t, 'Completion_reward': c, 'Energy_reward': e})
 
-            print(f"奖励各子项的值：p: {p}, v: {v}, t: {t}, c: {c}.")
+            print(f"奖励各子项的值：p: {p}, v: {v}, t: {t}, c: {c}, e: {e}.")
 
             return total_reward, info
 
@@ -643,12 +649,12 @@ class Env(gym.Env):
             self.obs['ev_connection_rate'] = self.ev_station.stats['current_connection_rate']
             self.obs['ev_charging_power'] = self.ev_station.stats['current_charging_power']
             self.obs['ev_success_rate'] = self.ev_station.stats['current_success_rate']
-            self.obs['com'] = self.ev_station.stats['current_success_rate']
+            self.obs['avg_target_achieved'] = self.ev_station.stats['avg_target_achieved']
         else:
             self.obs['ev_connection_rate'] = 0.0
             self.obs['ev_charging_power'] = 0.0
             self.obs['ev_success_rate'] = 0.0
-            self.obs['com'] = 0.0
+            self.obs['avg_target_achieved'] = 0.0
 
         if self.observe_load:
             self.obs['load_profile_t'] = self.all_load_profiles.iloc[self.t % self.horizon].to_dict()  # 截取负载曲线包括在obs中
@@ -785,12 +791,12 @@ class Env(gym.Env):
             self.obs['ev_connection_rate'] = self.ev_station.stats['current_connection_rate']
             self.obs['ev_charging_power'] = self.ev_station.stats['current_charging_power']
             self.obs['ev_success_rate'] = self.ev_station.stats['current_success_rate']
-            self.obs['com'] = self.ev_station.stats['current_success_rate']
+            self.obs['avg_target_achieved'] = self.ev_station.stats['avg_target_achieved']
         else:
             self.obs['ev_connection_rate'] = 0.0
             self.obs['ev_charging_power'] = 0.0
             self.obs['ev_success_rate'] = 0.0
-            self.obs['com'] = 0.0
+            self.obs['avg_target_achieved'] = 0.0
 
         if self.wrap_observation:
             return self.wrap_obs(self.obs), info
@@ -871,7 +877,7 @@ class Env(gym.Env):
         key_obs = ['bus_voltages', 'cap_statuses', 'reg_statuses', 'bat_statuses']
 
         # 添加充电站实时指标
-        ev_metrics = ['ev_connection_rate', 'ev_charging_power', 'ev_success_rate', 'com']
+        ev_metrics = ['ev_connection_rate', 'ev_charging_power', 'ev_success_rate', 'avg_target_achieved']
 
         if self.observe_load:
             key_obs.append('load_profile_t')

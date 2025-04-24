@@ -94,7 +94,7 @@ def seeding_all(seed) -> None:
 def evaluate_ppo_agent(model=None, model_path=None, args=None, load_profile_idx=0, worker_idx=None,
                        use_plot=False, print_step=False):
     """
-    评估PPO智能体性能 Todo: 保存路径和Generator的功率记录方式待更改。
+    评估PPO智能体性能 Todo: 保存路径和Generator的功率记录方式待更改；奖励函数及指标记录未修齐。
 
     Args:
         model: 已训练好的PPO模型对象(可选)
@@ -214,7 +214,7 @@ def evaluate_ppo_agent(model=None, model_path=None, args=None, load_profile_idx=
             connection_rate = env.obs.get('ev_connection_rate', 0) if hasattr(env, 'obs') else 0
             charging_power = env.obs.get('ev_charging_power', 0) if hasattr(env, 'obs') else 0
             success_rate = env.obs.get('ev_success_rate', 0) if hasattr(env, 'obs') else 0
-            completion_rate = env.obs.get('com', 0) if hasattr(env, 'obs') else 0
+            completion_rate = env.obs.get('avg_target_achieved', 0) if hasattr(env, 'obs') else 0
 
             f.write(f"{i},{connection_rate},{charging_power},{success_rate},{completion_rate}\n")
 
@@ -409,6 +409,14 @@ def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, pri
     model.save(model_path)  # 根据实际情况，好像不必检查目录是否存在，会自动创建
     print(f"模型已保存至 {model_path}")
 
+    # 保存奖励函数权重
+    reward_weights_file = os.path.join(save_path, "reward_weights.csv")
+    with open(reward_weights_file, 'w', encoding='utf-8') as f:
+        f.write("power_w,cap_w,reg_w,soc_w,dis_w,com_w,energy_w\n")
+        f.write(f"{env.reward_func.power_w},{env.reward_func.cap_w},{env.reward_func.reg_w},"
+                f"{env.reward_func.soc_w},{env.reward_func.dis_w},{env.reward_func.com_w},{env.reward_func.energy_w}\n")
+    print(f"奖励函数权重已保存至 {reward_weights_file}")
+
     # 准备数据记录文件
     rewards_file = os.path.join(save_path, "rewards.csv")
     voltages_file = os.path.join(save_path, "voltages.csv")
@@ -417,7 +425,7 @@ def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, pri
     node_powers_file = os.path.join(save_path, "node_powers.csv")
 
     with open(rewards_file, 'w', encoding='utf-8') as f:
-        f.write("step,总奖励值,电压奖励,功率损耗奖励,控制奖励,完成率奖励\n")
+        f.write("step,总奖励值,电压奖励,功率损耗奖励,控制奖励,完成率奖励,满足率奖励\n")
 
     with open(voltages_file, 'w', encoding='utf-8') as f:
         header = "step"
@@ -429,7 +437,7 @@ def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, pri
         f.write("step,P,Q,PowerLoss,PowerFactor\n")
 
     with open(ev_stats_file, 'w', encoding='utf-8') as f:
-        f.write("step,连接率,充电功率,成功率,完成率\n")
+        f.write("step,连接率,充电功率,成功率,平均满足率\n")
 
     # 初始化节点功率记录文件
     with open(node_powers_file, 'w') as f:
@@ -457,8 +465,9 @@ def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, pri
             p_reward = info.get('PowerLoss_reward', 0)  # 功率损耗奖励
             t_reward = info.get('Control_reward', 0)  # 控制奖励
             c_reward = info.get('Completion_reward', 0)  # 完成率奖励
+            e_reward = info.get('Energy_reward', 0)  # 满足率奖励
 
-            f.write(f"{i},{reward},{v_reward},{p_reward},{t_reward},{c_reward}\n")
+            f.write(f"{i},{reward},{v_reward},{p_reward},{t_reward},{c_reward},{e_reward}\n")
 
         # 记录各节点电压——无法直接通过obs进行，step传出的obs是展为数组的
         with open(voltages_file, 'a') as f:
@@ -491,9 +500,9 @@ def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, pri
             connection_rate = env.obs.get('ev_connection_rate', 0) if hasattr(env, 'obs') else 0
             charging_power = env.obs.get('ev_charging_power', 0) if hasattr(env, 'obs') else 0
             success_rate = env.obs.get('ev_success_rate', 0) if hasattr(env, 'obs') else 0
-            completion_rate = env.obs.get('com', 0) if hasattr(env, 'obs') else 0
+            avg_target_achieved = env.obs.get('avg_target_achieved', 0) if hasattr(env, 'obs') else 0
 
-            f.write(f"{i},{connection_rate},{charging_power},{success_rate},{completion_rate}\n")
+            f.write(f"{i},{connection_rate},{charging_power},{success_rate},{avg_target_achieved}\n")
 
         # 记录各节点的功率 - 从连接总线的负荷和发电设备获取功率
         with open(node_powers_file, 'a') as f:
