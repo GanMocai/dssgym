@@ -600,8 +600,8 @@ class Env(gym.Env):
                 bat_statuses[name] = [bat.soc, -1 * bat.actual_power() / bat.max_kw]
 
             # 然后添加充电站中连接的EV电池
-            if hasattr(self.circuit, 'ev_station') and self.circuit.ev_station is not None:
-                ev_statuses = self.circuit.ev_station.get_all_statuses()
+            if hasattr(self.circuit, 'ev_station') and self.ev_station is not None:
+                ev_statuses = self.ev_station.get_all_statuses()
                 for idx, status in enumerate(ev_statuses):
                     # 为充电站的每个连接点创建一个虚拟电池状态
                     bat_statuses[f'charger_{idx:02d}'] = status

@@ -28,6 +28,7 @@ import os
 import multiprocessing as mp
 
 import datetime
+import time
 
 
 def parse_arguments():
@@ -102,7 +103,7 @@ def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, pri
 
     # 创建以时间戳和环境名命名的文件夹
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    save_dir = f"results_{timestamp}_{args.env_name}"
+    save_dir = f"results_{timestamp}_{args.env_name}_{args.num_steps}"
     save_path = os.path.join(cwd, save_dir)
     if not os.path.exists(save_path):
         os.makedirs(save_path)
@@ -126,7 +127,7 @@ def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, pri
         print('-' * 80)
 
     # 创建回调
-    reward_monitor = RewardMonitorCallback(log_freq=100, output_path=f'{save_path}/rewards_in_training')  # 每100步记录一次
+    reward_monitor = RewardMonitorCallback(log_freq=100, output_path=f'{save_path}/rewards_in_training.csv')  # 每100步记录一次
 
     # 创建PPO模型并显式设置随机种子
     model = PPO("MlpPolicy", env,  # 默认策略网络，两层隐藏层的全连接网络，每层包含64个神经元
@@ -234,39 +235,61 @@ def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, pri
 
             f.write(f"{i},{connection_rate},{charging_power},{success_rate},{completion_rate}\n")
 
-        # 记录各节点的功率
+        # 记录各节点的功率 - 从连接总线的负荷和发电设备获取功率
         with open(node_powers_file, 'a') as f:
             line = f"{i}"
-            # 遍历所有总线，获取它们的功率
+            # 遍历所有总线和所有的负荷电源，获取它们的功率
             for bus_name in env.all_bus_names:
-                # 获取节点功率信息，如果不可用则为0
                 try:
+                    # 使用OpenDSS API获取连接到该节点的设备功率
                     # 设置总线为活动总线
                     env.circuit.dss.ActiveCircuit.SetActiveBus(bus_name)
-                    # 获取电压和电流
-                    voltages = env.circuit.dss.ActiveCircuit.ActiveBus.Voltages
-                    currents = env.circuit.dss.ActiveCircuit.ActiveBus.Isc
 
-                    # 计算复功率：S = V * I* (电压乘以电流的共轭)
                     active_power = 0
                     reactive_power = 0
 
-                    # 确保电压和电流数组长度相同且不为空
-                    if voltages is not None and currents is not None and len(voltages) == len(currents):
-                        for j in range(0, len(voltages), 2):  # 以2为步长遍历
-                            if j + 1 < len(voltages):
-                                # 实部计算有功功率，虚部计算无功功率
-                                v_real, v_imag = voltages[j], voltages[j + 1]
-                                i_real, i_imag = currents[j], currents[j + 1]
-                                # P = V_real*I_real + V_imag*I_imag
-                                active_power += v_real * i_real + v_imag * i_imag
-                                # Q = V_imag*I_real - V_real*I_imag
-                                reactive_power += v_imag * i_real - v_real * i_imag
+                    # 获取该总线的名称以便于查找连接的设备
+                    bus_name_dss = env.circuit.dss.ActiveCircuit.ActiveBus.Name
+
+                    # 获取连接到该总线的负荷
+                    if env.circuit.dss.ActiveCircuit.Loads.First != 0:
+                        while True:
+                            # 使用OpenDSS命令获取负荷连接的总线
+                            load_name = env.circuit.dss.ActiveCircuit.Loads.Name  # 获取迭代器当前所指的对象的名称
+                            env.circuit.dss.Text.Commands(f"? load.{load_name}.bus1")
+                            load_bus = env.circuit.dss.Text.Result.split(".")[0]
+                            # 检查负载是否连接到当前总线
+                            # load_bus = env.circuit.dss.ActiveCircuit.Loads.Bus1.split('.')[0]
+                            if load_bus.lower() == bus_name_dss.lower():
+                                # 累加功率
+                                active_power -= env.circuit.dss.ActiveCircuit.Loads.kW  # 负号表示负载消耗
+                                reactive_power -= env.circuit.dss.ActiveCircuit.Loads.kvar
+                            if env.circuit.dss.ActiveCircuit.Loads.Next == 0:  # 迭完了
+                                break
+
+                    # 获取连接到该总线的电源（其实还包括电池了）
+                    if env.circuit.dss.ActiveCircuit.Generators.First != 0:
+                        while True:
+                            # 使用OpenDSS命令获取负荷连接的总线
+                            gen_name = env.circuit.dss.ActiveCircuit.Generators.Name  # 获取迭代器当前所指的对象的名称
+                            env.circuit.dss.Text.Commands(f"? generator.{gen_name}.bus1")
+                            gen_bus = env.circuit.dss.Text.Result.split(".")[0]
+                            # 检查发电机是否连接到当前总线
+                            # gen_bus = env.circuit.dss.ActiveCircuit.Generators.Bus1.split('.')[0]
+                            if gen_bus.lower() == bus_name_dss.lower():
+                                # 累加功率
+                                active_power += env.circuit.dss.ActiveCircuit.Generators.kW  # 正号表示发电
+                                reactive_power += env.circuit.dss.ActiveCircuit.Generators.kvar
+                            if env.circuit.dss.ActiveCircuit.Generators.Next == 0:
+                                break
+
                 except Exception as e:
                     print(f"获取节点 {bus_name} 功率时出错: {e}")
                     active_power, reactive_power = 0, 0
+
                 line += f",{active_power},{reactive_power}"
             f.write(line + "\n")
+
         if print_step:
             print('\nStep:{}\n'.format(i))
             print('Action:', action)
@@ -474,7 +497,11 @@ if __name__ == '__main__':
     args = parse_arguments()
     seeding(args.seed)
     if args.mode.lower() == 'ppo':
+        start_time = time.time()
         run_ppo_agent(args, worker_idx=None, use_plot=args.use_plot, print_step=False)
+        stop_time = time.time()
+        execution_time = stop_time - start_time
+        print(f"运行时间: {execution_time:.2f}秒")
     elif args.mode.lower() == 'parallel_ppo':
         run_parallel_ppo_agent(args)
     elif args.mode.lower() == 'episodic_ppo':
