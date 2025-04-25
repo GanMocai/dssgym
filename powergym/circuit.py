@@ -199,7 +199,7 @@ class Circuits:
             if bat_name in self.batteries:  # 确保电池存在
                 batt = self.batteries[bat_name]
                 batt.kwh += batt.actual_power() * batt.duration
-                batt.kwh = round(max(0.0, min(batt.max_kwh, batt.kwh)))
+                batt.kwh = round(max(0.0, min(batt.max_kwh, batt.kwh)), 2)  # 提高精度，从整数保留到两位小数
                 batt.soc = batt.kwh / batt.max_kwh
                 soc_errs[i] = abs(batt.soc - batt.initial_soc)
 
@@ -230,7 +230,7 @@ class Circuits:
                     if full_name in self.batteries:  # 确保电池存在
                         batt = self.batteries[full_name]
                         batt.kwh += batt.actual_power() * batt.duration
-                        batt.kwh = round(max(0.0, min(batt.max_kwh, batt.kwh)))
+                        batt.kwh = round(max(0.0, min(batt.max_kwh, batt.kwh)), 2)
                         batt.soc = batt.kwh / batt.max_kwh
                         soc_errs[idx_in_bat_errs] = abs(batt.soc - batt.initial_soc)
 
@@ -1069,7 +1069,7 @@ class Battery(Node):
         """
         self.kwh += self.actual_power() * self.duration
         # 实现容量限制并将kwh的值截断为整数
-        self.kwh = round(max(0.0, min(self.max_kwh, self.kwh)))  # Fixme: 可能不需要进行截断，但是截断可能利于训练收敛
+        self.kwh = round(max(0.0, min(self.max_kwh, self.kwh)))  # Fixme: 可能不需要进行截断，但是截断可能利于训练收敛——不过这里没有实际使用
         self.soc = self.kwh / self.max_kwh
         soc_err = abs(self.soc - self.initial_soc)
 
