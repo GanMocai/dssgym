@@ -345,11 +345,13 @@ for env in _ENV_INFO.keys():
     _ENV_INFO[env]['dis_w'] = 0.0
     # 在info中添加充电站信息，包括母线、连接点数量
     _ENV_INFO[env].update(_STATION_INFO[sys])
-    # 在info中ev 充电需求队列文件路径
+    # 在info中ev充电需求队列文件路径
     _ENV_INFO[env].update(_EV_INFO[sys])
-    # 在 info 中添加充电站相关充电完成率的权重
+    # 在info中添加充电站相关充电完成率的权重
     _ENV_INFO[env]['completion_w'] = 1
     _ENV_INFO[env]['energy_w'] = 1
+    # 显式设置电压越限惩罚权重
+    _ENV_INFO[env]['voltage_w'] = 1
 
 
 # %% 函数

@@ -489,6 +489,7 @@ class Env(gym.Env):
             self.dis_w = info['dis_w']
             self.com_w = info['completion_w']
             self.energy_w = info['energy_w']
+            self.voltage_w = info['voltage_w']
 
         def powerloss_reward(self):
             # Penalty for power loss of entire system at one time step
@@ -528,7 +529,7 @@ class Env(gym.Env):
                 total_violation += (max_penalty + min_penalty)
                 if record_node and (max_penalty != 0 or min_penalty != 0):
                     violated_nodes.append(name)
-            return total_violation, violated_nodes
+            return total_violation*self.voltage_w, violated_nodes
 
         def composite_reward(self, cd, rd, soc, dis, full=True, record_node=False):
             # the main reward function
