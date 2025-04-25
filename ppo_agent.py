@@ -412,9 +412,10 @@ def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, pri
     # 保存奖励函数权重
     reward_weights_file = os.path.join(save_path, "reward_weights.csv")
     with open(reward_weights_file, 'w', encoding='utf-8') as f:
-        f.write("power_w,cap_w,reg_w,soc_w,dis_w,com_w,energy_w\n")
+        f.write("power_w,cap_w,reg_w,soc_w,dis_w,com_w,energy_w,voltage_w\n")
         f.write(f"{env.reward_func.power_w},{env.reward_func.cap_w},{env.reward_func.reg_w},"
-                f"{env.reward_func.soc_w},{env.reward_func.dis_w},{env.reward_func.com_w},{env.reward_func.energy_w}\n")
+                f"{env.reward_func.soc_w},{env.reward_func.dis_w},{env.reward_func.com_w},{env.reward_func.energy_w},"
+                f"{env.reward_func.voltage_w}\n")
     print(f"奖励函数权重已保存至 {reward_weights_file}")
 
     # 准备数据记录文件
