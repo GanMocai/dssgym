@@ -91,38 +91,48 @@ def seeding_all(seed) -> None:
         torch.backends.cudnn.benchmark = False
 
 
-def evaluate_ppo_agent(model=None, model_path=None, args=None, load_profile_idx=0, worker_idx=None,
-                       use_plot=False, print_step=False):
+def test_ppo_agent(model=None, model_path=None, output_dir=None, args=None, load_profile_idx=0,
+                   worker_idx=None, use_plot=False, print_step=False, gen_calculate=False):
     """
-    评估PPO智能体性能 Todo: 保存路径和Generator的功率记录方式待更改；奖励函数及指标记录未修齐。
+    测试PPO智能体并保存结果到指定目录 Todo: Generator的功率记录方式待更改；奖励函数及指标记录未修齐。
 
     Args:
         model: 已训练好的PPO模型对象(可选)
         model_path: 模型文件路径(可选)
+        output_dir: 输出目录路径(可选)，不指定时使用model_path父目录
         args: 命令行参数
         load_profile_idx: 负载配置索引
         worker_idx: 进程ID
         use_plot: 是否绘图
         print_step: 是否打印每步信息
+        gen_calculate: 是否通过Power获取generator类型的功率
+
+    Returns:
+        episode_reward: 评估回合的总奖励
+        save_path: 结果保存路径
     """
     if model is None and model_path is None:
         raise ValueError("必须提供model或model_path其中之一")
 
-    # 创建以时间戳命名的测试结果文件夹
+    # 确定保存路径
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    # 确定保存路径，如果提供了model_path，使用其父目录
-    if model_path:
-        parent_dir = os.path.dirname(os.path.abspath(model_path))
+    if output_dir:
+        # 使用指定的输出目录
+        base_dir = output_dir
+    elif model_path:
+        # 使用模型文件的父目录的父目录
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(model_path)))
     else:
-        cwd = os.getcwd()
-        parent_dir = cwd
+        # 如果都没指定，使用当前工作目录
+        base_dir = os.getcwd()
 
-    save_path = os.path.join(parent_dir, f"test_results_{timestamp}")
+    # 创建结果目录
+    save_path = os.path.join(base_dir, f"test_results_{timestamp}")
     if not os.path.exists(save_path):
         os.makedirs(save_path)
 
-    # 创建保存图像的目录
+    # 创建绘图子目录
     plot_dir = os.path.join(save_path, "plots")
     if use_plot and not os.path.exists(plot_dir):
         os.makedirs(plot_dir)
@@ -132,20 +142,39 @@ def evaluate_ppo_agent(model=None, model_path=None, args=None, load_profile_idx=
     env.seed(args.seed + 0 if worker_idx is None else worker_idx)
 
     # 加载模型(如果未提供model)
-    if model is None:
+    if model is None and model_path is not None:
         from stable_baselines3 import PPO
-        model = PPO.load(model_path, env=env)
-        print(f"已从{model_path}加载模型")
+        try:
+            model = PPO.load(model_path, env=env)
+            print(f"已从{model_path}加载模型")
+        except Exception as e:
+            print(f"加载模型失败: {e}")
+            return 0, save_path
+
+    # 记录测试信息
+    with open(os.path.join(save_path, "test_info.txt"), "w") as f:
+        f.write(f"测试时间: {timestamp}\n")
+        f.write(f"环境名称: {args.env_name}\n")
+        f.write(f"负载配置索引: {load_profile_idx}\n")
+        if model_path:
+            f.write(f"模型路径: {model_path}\n")
+        f.write(f"随机种子: {args.seed}\n")
 
     # 准备数据记录文件
-    rewards_file = os.path.join(save_path, "rewards.csv")
+    actions_file = os.path.join(save_path, "actions.csv")
     voltages_file = os.path.join(save_path, "voltages.csv")
-    powers_file = os.path.join(save_path, "powers.csv")
+    total_powers_file = os.path.join(save_path, "total_powers.csv")
     ev_stats_file = os.path.join(save_path, "ev_stats.csv")
     node_powers_file = os.path.join(save_path, "node_powers.csv")
+    rewards_file = os.path.join(save_path, "rewards.csv")
 
-    with open(rewards_file, 'w', encoding='utf-8') as f:
-        f.write("step,总奖励值,电压奖励,功率损耗奖励,控制奖励,完成率奖励\n")
+    # 初始化CSV文件
+    with open(actions_file, 'w') as f:
+        header = "step"
+        action_dim = env.action_space.shape[0] if hasattr(env.action_space, 'shape') else 1
+        for i in range(action_dim):
+            header += f",action_{i}"
+        f.write(header + "\n")
 
     with open(voltages_file, 'w', encoding='utf-8') as f:
         header = "step"
@@ -153,20 +182,22 @@ def evaluate_ppo_agent(model=None, model_path=None, args=None, load_profile_idx=
             header += f",{bus_name}"
         f.write(header + "\n")
 
-    with open(powers_file, 'w', encoding='utf-8') as f:
+    with open(total_powers_file, 'w', encoding='utf-8') as f:
         f.write("step,P,Q,PowerLoss,PowerFactor\n")
 
     with open(ev_stats_file, 'w', encoding='utf-8') as f:
-        f.write("step,连接率,充电功率,成功率,完成率\n")
+        f.write("step,连接率,充电功率,成功率,平均满足率\n")
 
-    # 初始化节点功率记录文件
     with open(node_powers_file, 'w') as f:
         header = "step"
         for bus_name in env.all_bus_names:
             header += f",{bus_name}_P,{bus_name}_Q"
         f.write(header + "\n")
 
-    # 评估模型性能
+    with open(rewards_file, 'w', encoding='utf-8') as f:
+        f.write("step,总奖励值,电压奖励,功率损耗奖励,控制奖励,完成率奖励,满足率奖励\n")
+
+    # 开始测试
     obs, info = env.reset(seed=args.seed, options={'load_profile_idx': load_profile_idx})
 
     episode_reward = 0.0
@@ -177,35 +208,51 @@ def evaluate_ppo_agent(model=None, model_path=None, args=None, load_profile_idx=
         episode_reward += reward
 
         if print_step:
-            print(f"Worker {worker_idx}, Step {i}, Reward {reward}")
+            print(f"进程 {worker_idx}, Step {i}\n"
+                  f"Action: {action}, Obs: {obs}, Reward: {reward:.4f}, Done: {done}, Info: {info}.")
+
+        # 在每步记录动作
+        with open(actions_file, 'a') as f:
+            line = f"{i}"
+            if isinstance(action, np.ndarray):
+                for act_val in action:
+                    line += f",{act_val}"
+            else:
+                line += f",{action}"
+            f.write(line + "\n")
 
         # 记录奖励函数详情
         with open(rewards_file, 'a') as f:
-            # 提取奖励分量
             v_reward = info.get('Voltage_reward', 0)
             p_reward = info.get('PowerLoss_reward', 0)
             t_reward = info.get('Control_reward', 0)
             c_reward = info.get('Completion_reward', 0)
+            e_reward = info.get('Energy_reward', 0)
 
-            f.write(f"{i},{reward},{v_reward},{p_reward},{t_reward},{c_reward}\n")
+            f.write(f"{i},{reward},{v_reward},{p_reward},{t_reward},{c_reward},{e_reward}\n")
 
-        # 记录各节点电压
+        # 记录各节点电压——无法直接通过obs进行，step传出的obs是展为数组的
         with open(voltages_file, 'a') as f:
             line = f"{i}"
             for bus_name in env.all_bus_names:
+                # 直接使用环境的circuit对象获取电压数据，类似于环境内部的实现
                 bus_voltage = env.circuit.bus_voltage(bus_name)
+                # 只保留实部值(偶数索引)
                 bus_voltage_real = [bus_voltage[j] for j in range(len(bus_voltage)) if j % 2 == 0]
+                # 计算平均电压值
                 voltage_value = sum(bus_voltage_real) / len(bus_voltage_real) if bus_voltage_real else 0
                 line += f",{voltage_value}"
             f.write(line + "\n")
 
         # 记录系统功率
-        with open(powers_file, 'a') as f:
+        with open(total_powers_file, 'a') as f:
             active_power = env.circuit.total_power()[0]
             reactive_power = env.circuit.total_power()[1]
             power_loss = env.circuit.total_loss()[0]
             power_factor = active_power / (
                 np.sqrt(active_power ** 2 + reactive_power ** 2)) if active_power != 0 or reactive_power != 0 else 0
+            # 修正功率因数符号
+            power_factor = abs(power_factor) if (active_power<0 and reactive_power<=0) or (active_power>0 and reactive_power>=0) else -abs(power_factor)
 
             f.write(f"{i},{active_power},{reactive_power},{power_loss},{power_factor}\n")
 
@@ -214,33 +261,34 @@ def evaluate_ppo_agent(model=None, model_path=None, args=None, load_profile_idx=
             connection_rate = env.obs.get('ev_connection_rate', 0) if hasattr(env, 'obs') else 0
             charging_power = env.obs.get('ev_charging_power', 0) if hasattr(env, 'obs') else 0
             success_rate = env.obs.get('ev_success_rate', 0) if hasattr(env, 'obs') else 0
-            completion_rate = env.obs.get('avg_target_achieved', 0) if hasattr(env, 'obs') else 0
+            avg_target_achieved = env.obs.get('avg_target_achieved', 0) if hasattr(env, 'obs') else 0
 
-            f.write(f"{i},{connection_rate},{charging_power},{success_rate},{completion_rate}\n")
+            f.write(f"{i},{connection_rate},{charging_power},{success_rate},{avg_target_achieved}\n")
 
-        # 记录各节点的功率
+        # 记录各节点的功率 - 从连接总线的负荷和发电设备获取功率
         with open(node_powers_file, 'a') as f:
             line = f"{i}"
-            # 遍历所有总线，获取它们的功率
             for bus_name in env.all_bus_names:
                 try:
+                    # 使用OpenDSS API获取连接到该节点的设备功率
                     # 设置总线为活动总线
                     env.circuit.dss.ActiveCircuit.SetActiveBus(bus_name)
 
                     active_power = 0
                     reactive_power = 0
 
-                    # 获取该总线的名称以便于查找连接的设备
+                    # 获取该总线名称以便于查找连接的设备
                     bus_name_dss = env.circuit.dss.ActiveCircuit.ActiveBus.Name
 
-                    # 获取连接到该总线的负荷
+                    # 获取连接到该总线的负荷——通过kW和kVar获取得到的是基值而非实际值
                     if env.circuit.dss.ActiveCircuit.Loads.First != 0:
                         while True:
                             # 使用OpenDSS命令获取负荷连接的总线
-                            load_name = env.circuit.dss.ActiveCircuit.Loads.Name
+                            load_name = env.circuit.dss.ActiveCircuit.Loads.Name  # 获取迭代器当前所指的对象的名称
                             env.circuit.dss.Text.Commands(f"? load.{load_name}.bus1")
                             load_bus = env.circuit.dss.Text.Result.split(".")[0]
-
+                            # 检查负载是否连接到当前总线
+                            # load_bus = env.circuit.dss.ActiveCircuit.Loads.Bus1.split('.')[0]
                             if load_bus.lower() == bus_name_dss.lower():
                                 # 设置该负荷为活动元件
                                 env.circuit.dss.ActiveCircuit.SetActiveElement(f"Load.{load_name}")
@@ -252,79 +300,112 @@ def evaluate_ppo_agent(model=None, model_path=None, args=None, load_profile_idx=
                                         active_power -= powers[j]  # 负载消耗为负
                                         if j + 1 < len(powers):
                                             reactive_power -= powers[j + 1]
-
-                            if env.circuit.dss.ActiveCircuit.Loads.Next() == 0:  # 注意这里添加了括号
+                            if env.circuit.dss.ActiveCircuit.Loads.Next == 0:  # 迭完了
                                 break
 
-                    # 获取连接到该总线的电源
+                    # 获取连接到该总线的电源（其实还包括电池）——在model=1且未设置调度曲线时，kW和实际功率应该一致
                     if env.circuit.dss.ActiveCircuit.Generators.First != 0:
-                        while True:
-                            # 使用OpenDSS命令获取发电机连接的总线
-                            gen_name = env.circuit.dss.ActiveCircuit.Generators.Name
-                            env.circuit.dss.Text.Commands(f"? generator.{gen_name}.bus1")
-                            gen_bus = env.circuit.dss.Text.Result.split(".")[0]
+                        if gen_calculate:
+                            while True:
+                                gen_name = env.circuit.dss.ActiveCircuit.Generators.Name
+                                env.circuit.dss.Text.Commands(f"? generator.{gen_name}.bus1")
+                                gen_bus = env.circuit.dss.Text.Result.split(".")[0]
 
-                            if gen_bus.lower() == bus_name_dss.lower():
-                                # 设置该发电机为活动元件
-                                env.circuit.dss.ActiveCircuit.SetActiveElement(f"Generator.{gen_name}")
-                                # 获取发电机的功率
-                                powers = env.circuit.dss.ActiveCircuit.ActiveCktElement.Powers
-                                # 累加功率（偶数索引是P，奇数索引是Q）
-                                if powers is not None and len(powers) > 0:
-                                    for j in range(0, len(powers), 2):
-                                        active_power += powers[j]  # 发电为正
-                                        if j + 1 < len(powers):
-                                            reactive_power += powers[j + 1]
+                                if gen_bus.lower() == bus_name_dss.lower():
+                                    env.circuit.dss.ActiveCircuit.SetActiveElement(f"Generator.{gen_name}")
+                                    powers = env.circuit.dss.ActiveCircuit.ActiveCktElement.Powers
+                                    if powers is not None and len(powers) > 0:
+                                        for j in range(0, len(powers), 2):
+                                            active_power += powers[j]
+                                            if j + 1 < len(powers):
+                                                reactive_power += powers[j + 1]
 
-                            if env.circuit.dss.ActiveCircuit.Generators.Next() == 0:  # 注意这里添加了括号
-                                break
+                                if env.circuit.dss.ActiveCircuit.Generators.Next() == 0:
+                                    break
+                        else:
+                            while True:
+                                # 使用OpenDSS命令获取负荷连接的总线
+                                gen_name = env.circuit.dss.ActiveCircuit.Generators.Name  # 获取迭代器当前所指的对象的名称
+                                env.circuit.dss.Text.Commands(f"? generator.{gen_name}.bus1")
+                                gen_bus = env.circuit.dss.Text.Result.split(".")[0]
+                                # 检查发电机是否连接到当前总线
+                                # gen_bus = env.circuit.dss.ActiveCircuit.Generators.Bus1.split('.')[0]
+                                if gen_bus.lower() == bus_name_dss.lower():
+                                    # 累加功率
+                                    active_power += env.circuit.dss.ActiveCircuit.Generators.kW  # 正号表示发电
+                                    reactive_power += env.circuit.dss.ActiveCircuit.Generators.kvar
+                                if env.circuit.dss.ActiveCircuit.Generators.Next == 0:
+                                    break
 
                 except Exception as e:
-                    print(f"获取节点 {bus_name} 功率时出错: {e}")
+                    print(f"获取节点 {bus_name} 功率时出错: {e}. 已设置为零。")
                     active_power, reactive_power = 0, 0
 
                 line += f",{active_power},{reactive_power}"
             f.write(line + "\n")
 
-        if print_step:
-            print('\nStep:{}\n'.format(i))
-            print('Action:', action)
-            print('Next Obs: {} R: {} Done: {} Info: {}'.format(obs, reward, done, info))
-
+        # 绘制静态图
         if use_plot:
+            # node_bound参数用于决定为具有多相的节点绘制最大或最小节点电压
             fig, _ = env.plot_graph()
             fig.tight_layout(pad=0.1)
-            fig.savefig(os.path.join(plot_dir, 'node_voltage_' + str(i).zfill(4) + '.png'))
+            fig.savefig(os.path.join(plot_dir, f"node_voltage_{i:04d}.png"))
             plt.close()
 
-    # 导出schedule为csv
-    env.ev_station.export_schedule(output_path=os.path.join(save_path, 'schedule.csv'))
+    # 导出充电站调度表
+    try:
+        env.ev_station.export_schedule(output_path=os.path.join(save_path, "schedule.csv"))
+    except Exception as e:
+        print(f"导出充电站调度表失败: {e}。")
 
-    print(f'负载配置索引: {load_profile_idx}, 回合总奖励: {episode_reward:.4f}')
-
-    # 根据保存的png图像生成GIF
+    # 生成系统布局图和动画
     if use_plot:
-        fig, _ = env.plot_graph(show_voltages=False)
-        fig.tight_layout(pad=0.1)
-        fig.savefig(os.path.join(plot_dir, 'system_layout.pdf'))
+        try:
+            # 系统布局图
+            fig, _ = env.plot_graph(show_voltages=False)
+            fig.tight_layout(pad=0.1)
+            fig.savefig(os.path.join(plot_dir, "system_layout.pdf"))
+            plt.close()
 
-        # 生成GIF动画
-        images = []
-        filenames = sorted(glob.glob(os.path.join(plot_dir, "node_voltage_*.png")))
-        for filename in filenames:
-            images.append(imageio.imread(filename))
+            # 生成动画
+            images = []
+            filenames = sorted(glob.glob(os.path.join(plot_dir, "node_voltage_*.png")))
+            for filename in filenames:
+                images.append(imageio.imread(filename))
 
-        if images:
-            imageio.mimsave(
-                os.path.join(plot_dir, 'node_voltage.gif'),
-                images,
-                fps=2,
-                loop=0,
-                duration=500
-            )
-            print(f"已生成GIF动画，包含{len(images)}步")
+            if images:  # 确保有图像才生成GIF
+                # 使用更好的参数设置来确保动画效果
+                imageio.mimsave(
+                    os.path.join(plot_dir, 'node_voltage.gif'),
+                    images,
+                    fps=2,  # 提高帧率使动画更流畅
+                    loop=0,  # 0表示无限循环
+                    duration=500  # 每帧显示500毫秒
+                )
+                print(f"已生成GIF动画，包含{len(images)}步")
+        except Exception as e:
+            print(f"生成图像或动画失败: {e}")
 
-    return episode_reward
+    # 保存总结数据
+    with open(os.path.join(save_path, "summary.txt"), "w") as f:
+        f.write(f"总奖励: {episode_reward:.4f}\n")
+        f.write(f"步数: {env.horizon}\n")
+        # 添加电压违规率统计
+        try:
+            voltage_data = np.loadtxt(voltages_file, delimiter=',', skiprows=1)
+            if voltage_data.shape[0] > 0:
+                voltage_values = voltage_data[:, 1:]  # 第一列是步数
+                under_voltage_rate = np.mean(voltage_values < 0.95) * 100
+                over_voltage_rate = np.mean(voltage_values > 1.05) * 100
+                f.write(f"电压低于0.95标幺值比例: {under_voltage_rate:.2f}%\n")
+                f.write(f"电压高于1.05标幺值比例: {over_voltage_rate:.2f}%\n")
+        except Exception as e:
+            print(f"计算电压违规率失败: {e}")
+
+    print(f"测试完成 - 总奖励: {episode_reward:.4f}")
+    print(f"测试结果保存在: {save_path}")
+
+    return episode_reward, save_path
 
 
 def test_saved_model(model_path, args, load_profile_idx=0, use_plot=True, print_step=True):
@@ -338,8 +419,8 @@ def test_saved_model(model_path, args, load_profile_idx=0, use_plot=True, print_
         use_plot: 是否绘制图形
         print_step: 是否打印每步详情
     """
-    print(f"使用保存的模型 {model_path} 进行评估...")
-    return evaluate_ppo_agent(
+    print(f"使用保存的模型 {model_path} 进行测试...")
+    return test_ppo_agent(
         model_path=model_path,
         args=args,
         load_profile_idx=load_profile_idx,
@@ -370,11 +451,11 @@ def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, pri
 
     # 在文件夹中创建保存模型和图像子目录
     model_dir = os.path.join(save_path, args.model_path)
-    plot_dir = os.path.join(save_path, args.plot_path)
+    # plot_dir = os.path.join(save_path, args.plot_path)
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
-    if use_plot and not os.path.exists(plot_dir):
-        os.makedirs(plot_dir)
+    # if use_plot and not os.path.exists(plot_dir):
+    #     os.makedirs(plot_dir)
 
     # 获取环境
     env = make_env(args.env_name, worker_idx=worker_idx)
@@ -387,7 +468,7 @@ def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, pri
         print('-' * 80)
 
     # 创建回调
-    reward_monitor = RewardMonitorCallback(log_freq=100, output_path=f'{save_path}/rewards_in_training.csv')  # 每100步记录一次
+    reward_monitor = RewardMonitorCallback(log_freq=100, output_path=os.path.join(save_path, 'rewards_in_training.csv'))  # 每100步记录一次
 
     # 创建PPO模型并显式设置随机种子
     model = PPO("MlpPolicy", env,  # 默认策略网络，两层隐藏层的全连接网络，每层包含64个神经元
@@ -418,194 +499,7 @@ def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, pri
                 f"{env.reward_func.voltage_w}\n")
     print(f"奖励函数权重已保存至 {reward_weights_file}")
 
-    # 准备数据记录文件
-    rewards_file = os.path.join(save_path, "rewards.csv")
-    voltages_file = os.path.join(save_path, "voltages.csv")
-    powers_file = os.path.join(save_path, "powers.csv")
-    ev_stats_file = os.path.join(save_path, "ev_stats.csv")
-    node_powers_file = os.path.join(save_path, "node_powers.csv")
-
-    with open(rewards_file, 'w', encoding='utf-8') as f:
-        f.write("step,总奖励值,电压奖励,功率损耗奖励,控制奖励,完成率奖励,满足率奖励\n")
-
-    with open(voltages_file, 'w', encoding='utf-8') as f:
-        header = "step"
-        for bus_name in env.all_bus_names:
-            header += f",{bus_name}"
-        f.write(header + "\n")
-
-    with open(powers_file, 'w', encoding='utf-8') as f:
-        f.write("step,P,Q,PowerLoss,PowerFactor\n")
-
-    with open(ev_stats_file, 'w', encoding='utf-8') as f:
-        f.write("step,连接率,充电功率,成功率,平均满足率\n")
-
-    # 初始化节点功率记录文件
-    with open(node_powers_file, 'w') as f:
-        header = "step"
-        for bus_name in env.all_bus_names:
-            header += f",{bus_name}_P,{bus_name}_Q"  # 每个节点记录有功功率P和无功功率Q
-        f.write(header + "\n")
-
-    # 评估模型性能
-    # obs = env.reset(load_profile_idx=load_profile_idx)
-    obs, info = env.reset(seed=args.seed, options={'load_profile_idx': load_profile_idx})  # 显式传递种子
-
-    episode_reward = 0.0
-    for i in range(env.horizon):
-        action, _ = model.predict(obs, deterministic=True)
-        obs, reward, terminated, truncated, info = env.step(action)
-        done = terminated or truncated
-        episode_reward += reward
-        print(worker_idx, i, reward)
-
-        # 记录奖励函数详情
-        with open(rewards_file, 'a') as f:
-            # 提取奖励分量
-            v_reward = info.get('Voltage_reward', 0)  # 电压奖励
-            p_reward = info.get('PowerLoss_reward', 0)  # 功率损耗奖励
-            t_reward = info.get('Control_reward', 0)  # 控制奖励
-            c_reward = info.get('Completion_reward', 0)  # 完成率奖励
-            e_reward = info.get('Energy_reward', 0)  # 满足率奖励
-
-            f.write(f"{i},{reward},{v_reward},{p_reward},{t_reward},{c_reward},{e_reward}\n")
-
-        # 记录各节点电压——无法直接通过obs进行，step传出的obs是展为数组的
-        with open(voltages_file, 'a') as f:
-            line = f"{i}"
-            for bus_name in env.all_bus_names:
-                # 直接使用环境的circuit对象获取电压数据，类似于环境内部的实现
-                bus_voltage = env.circuit.bus_voltage(bus_name)
-                # 只保留实部值(偶数索引)
-                bus_voltage_real = [bus_voltage[j] for j in range(len(bus_voltage)) if j % 2 == 0]
-                # 计算平均电压值
-                voltage_value = sum(bus_voltage_real) / len(bus_voltage_real) if bus_voltage_real else 0
-                line += f",{voltage_value}"
-            f.write(line + "\n")
-
-        # 记录系统功率
-        with open(powers_file, 'a') as f:
-            # 获取系统功率信息
-            active_power = env.circuit.total_power()[0]
-            reactive_power = env.circuit.total_power()[1]
-            power_loss = env.circuit.total_loss()[0]
-            # 计算功率因数
-            power_factor = active_power / (
-                np.sqrt(active_power ** 2 + reactive_power ** 2)) if active_power != 0 or reactive_power != 0 else 0
-
-            f.write(f"{i},{active_power},{reactive_power},{power_loss},{power_factor}\n")
-
-        # 记录EV充电站统计数据
-        with open(ev_stats_file, 'a') as f:
-            # 直接从环境获取EV数据，而不是从obs获取
-            connection_rate = env.obs.get('ev_connection_rate', 0) if hasattr(env, 'obs') else 0
-            charging_power = env.obs.get('ev_charging_power', 0) if hasattr(env, 'obs') else 0
-            success_rate = env.obs.get('ev_success_rate', 0) if hasattr(env, 'obs') else 0
-            avg_target_achieved = env.obs.get('avg_target_achieved', 0) if hasattr(env, 'obs') else 0
-
-            f.write(f"{i},{connection_rate},{charging_power},{success_rate},{avg_target_achieved}\n")
-
-        # 记录各节点的功率 - 从连接总线的负荷和发电设备获取功率
-        with open(node_powers_file, 'a') as f:
-            line = f"{i}"
-            # 遍历所有总线和所有的负荷电源，获取它们的功率
-            for bus_name in env.all_bus_names:
-                try:
-                    # 使用OpenDSS API获取连接到该节点的设备功率
-                    # 设置总线为活动总线
-                    env.circuit.dss.ActiveCircuit.SetActiveBus(bus_name)
-
-                    active_power = 0
-                    reactive_power = 0
-
-                    # 获取该总线的名称以便于查找连接的设备
-                    bus_name_dss = env.circuit.dss.ActiveCircuit.ActiveBus.Name
-
-                    # 获取连接到该总线的负荷——通过kW和kVar获取得到的是基值而非实际值
-                    if env.circuit.dss.ActiveCircuit.Loads.First != 0:
-                        while True:
-                            # 使用OpenDSS命令获取负荷连接的总线
-                            load_name = env.circuit.dss.ActiveCircuit.Loads.Name  # 获取迭代器当前所指的对象的名称
-                            env.circuit.dss.Text.Commands(f"? load.{load_name}.bus1")
-                            load_bus = env.circuit.dss.Text.Result.split(".")[0]
-                            # 检查负载是否连接到当前总线
-                            # load_bus = env.circuit.dss.ActiveCircuit.Loads.Bus1.split('.')[0]
-                            if load_bus.lower() == bus_name_dss.lower():
-                                # 设置该负荷为活动元件
-                                env.circuit.dss.ActiveCircuit.SetActiveElement(f"Load.{load_name}")
-                                # 获取负荷的功率
-                                powers = env.circuit.dss.ActiveCircuit.ActiveCktElement.Powers
-                                # 累加功率（偶数索引是P，奇数索引是Q）
-                                if powers is not None and len(powers) > 0:
-                                    for j in range(0, len(powers), 2):
-                                        active_power -= powers[j]  # 负载消耗为负
-                                        if j + 1 < len(powers):
-                                            reactive_power -= powers[j + 1]
-                            if env.circuit.dss.ActiveCircuit.Loads.Next == 0:  # 迭完了
-                                break
-
-                    # 获取连接到该总线的电源（其实还包括电池）——在model=1且未设置调度曲线时，kW和实际功率应该一致
-                    if env.circuit.dss.ActiveCircuit.Generators.First != 0:
-                        while True:
-                            # 使用OpenDSS命令获取负荷连接的总线
-                            gen_name = env.circuit.dss.ActiveCircuit.Generators.Name  # 获取迭代器当前所指的对象的名称
-                            env.circuit.dss.Text.Commands(f"? generator.{gen_name}.bus1")
-                            gen_bus = env.circuit.dss.Text.Result.split(".")[0]
-                            # 检查发电机是否连接到当前总线
-                            # gen_bus = env.circuit.dss.ActiveCircuit.Generators.Bus1.split('.')[0]
-                            if gen_bus.lower() == bus_name_dss.lower():
-                                # 累加功率
-                                active_power += env.circuit.dss.ActiveCircuit.Generators.kW  # 正号表示发电
-                                reactive_power += env.circuit.dss.ActiveCircuit.Generators.kvar
-                            if env.circuit.dss.ActiveCircuit.Generators.Next == 0:
-                                break
-
-                except Exception as e:
-                    print(f"获取节点 {bus_name} 功率时出错: {e}")
-                    active_power, reactive_power = 0, 0
-
-                line += f",{active_power},{reactive_power}"
-            f.write(line + "\n")
-
-        if print_step:
-            print('\nStep:{}\n'.format(i))
-            print('Action:', action)
-            print('Next Obs: {} R: {} Done: {} Info: {}'.format(obs, reward, done, info))
-
-        if use_plot:
-            # node_bound参数用于决定为具有多相的节点绘制最大或最小节点电压
-            fig, _ = env.plot_graph()
-            fig.tight_layout(pad=0.1)
-            fig.savefig(os.path.join(plot_dir, 'node_voltage_' + str(i).zfill(4) + '.png'))
-            plt.close()
-
-    # 导出schedule为csv
-    env.ev_station.export_schedule(output_path=save_path+r'\schedule.csv')
-
-    print(f'load_profile: {load_profile_idx}, episode_reward: {episode_reward}')
-
-    # 根据保存的png图像生成GIF
-    if use_plot:
-        fig, _ = env.plot_graph(show_voltages=False)
-        fig.tight_layout(pad=0.1)
-        fig.savefig(os.path.join(plot_dir, 'system_layout.pdf'))
-
-        # 改进GIF动画生成
-        images = []
-        filenames = sorted(glob.glob(os.path.join(plot_dir, "node_voltage_*.png")))
-        for filename in filenames:
-            images.append(imageio.imread(filename))
-
-        if images:  # 确保有图像才生成GIF
-            # 使用更好的参数设置来确保动画效果
-            imageio.mimsave(
-                os.path.join(plot_dir, 'node_voltage.gif'),
-                images,
-                fps=2,  # 提高帧率使动画更流畅
-                loop=0,  # 0表示无限循环
-                duration=500  # 每帧显示500毫秒
-            )
-            print(f"已生成GIF动画，包含{len(images)}步")
+    test_ppo_agent(model_path=model_path,args=args,load_profile_idx=load_profile_idx,use_plot=use_plot, print_step=print_step)
 
 
 def run_parallel_ppo_agent(args):
