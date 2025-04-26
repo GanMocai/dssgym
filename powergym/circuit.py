@@ -169,7 +169,7 @@ class Circuits:
                     kw, kvar = bat2kwkvar[dssGen.Name]
                     dssGen.kW = kw
                     dssGen.kvar = kvar
-                    print(f'已在 set_all_batteries_before_solve 中设置 {dssGen.Name} 有无功功率为 {dssGen.kW}, {dssGen.kvar}')
+                    print(f'已在 set_all_batteries_before_solve 中设置 {dssGen.Name} 消耗的有无功功率为 {-dssGen.kW}, {-dssGen.kvar}')
                 if dssGen.Next == 0:  # 没有下一个这类对象
                     break
 
@@ -964,6 +964,7 @@ class Battery(Node):
     """
 
     def __init__(self, dss, batname, bus1, phases, feature, bat_act_num=33):
+        # Todo:这里没考虑效率——一般设置为0.9~0.95
         super().__init__(batname, bus1, phases)
         self.dss = dss  # the circuit's dss simulator object
         self.max_kw = feature.max_kw  # maximum power magnitude
@@ -972,9 +973,9 @@ class Battery(Node):
         self.kwh = feature.initial_kwh  # current charge
         self.soc = self.kwh / self.max_kwh  # state of charge
         self.initial_soc = self.soc  # initial soc
-        self.duration = self.dss.ActiveCircuit.Solution.StepSize / 3600.0  # time step in hour
+        self.duration = self.dss.ActiveCircuit.Solution.StepSize / 3600.0  # time step in hour——一个时间步对应的小时数
         if self.duration < 1e-5: self.duration = 1.0
-        self.enabled = True  # 默认启用 Todo: 添加相关逻辑
+        self.enabled = True  # 默认启用 Todo: 添加实际逻辑启用弃用
 
         # battery states
         self.bat_act_num = bat_act_num
@@ -1120,7 +1121,7 @@ class BatteryController:
             self.active_batteries[bat_name] = battery
             self.battery_history[bat_name] = []
 
-    def connect_battery(self, name, bus, max_kw=100, max_kwh=100, initial_soc=0.2, pf=0.95):
+    def connect_battery(self, name, bus, max_kw=100, max_kwh=100, initial_soc=0.2, pf=-0.98):
         """连接指定的电池或创建新电池，借助 circuit.add_batteries
         Args:
             name (str): 电池名称，或者说电动汽车编号
