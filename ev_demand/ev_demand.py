@@ -345,7 +345,9 @@ if __name__ == '__main__':
 
     # 汽车参数生成
     # 1. 分布文件基础路径
-    base_path = r"D:\LENOVO\Documents\Python\ML\data\data_analyse\distribution"
+    base_path = r"D:\LENOVO\Documents\Python\ML\data\data_analyse\distribution\public_parking-general"
+    dist_scenario = os.path.basename(base_path)
+    dist_location, dist_day_type = os.path.basename(base_path).split('-')
 
     # 2. 生成EV需求数据
     np.random.seed(22)  # 设置随机种子 in conference paper 22
@@ -360,12 +362,12 @@ if __name__ == '__main__':
     battery_capacity = {i: ev_demand[i]['battery_capacity'] for i in range(Num_EVs)}
 
     # 打印统计信息
-    print(f"生成了 {Num_EVs} 辆电动汽车的充电需求")
+    print(f"根据 {dist_scenario} 场景的分布生成了 {Num_EVs} 辆电动汽车的充电需求")
     print(f"平均电池容量: {np.mean(list(battery_capacity.values())):.2f} kWh")
     print(f"平均充电时长: {np.mean(list(charge_duration_required.values())) / 4:.2f} 小时")
 
     # 3. 转换为DataFrame并保存为CSV文件
     ev_df = pd.DataFrame.from_dict(ev_demand, orient='index')
-    csv_file = os.path.join(os.getcwd(), "ev_demand.csv")
+    csv_file = os.path.join(os.getcwd(), f"ev_demand-{dist_scenario}-{Num_EVs}.csv")
     ev_df.to_csv(csv_file, index=False)
     print(f"EV需求数据已保存至 {csv_file}")
