@@ -152,7 +152,7 @@ def test_ppo_agent(model=None, model_path=None, output_dir=None, args=None, load
             return 0, save_path
 
     # 记录测试信息
-    with open(os.path.join(save_path, "test_info.txt"), "w") as f:
+    with open(os.path.join(save_path, "test_info.txt"), "w", encoding='utf-8') as f:
         f.write(f"测试时间: {timestamp}\n")
         f.write(f"环境名称: {args.env_name}\n")
         f.write(f"负载配置索引: {load_profile_idx}\n")
@@ -387,7 +387,7 @@ def test_ppo_agent(model=None, model_path=None, output_dir=None, args=None, load
             print(f"生成图像或动画失败: {e}")
 
     # 保存总结数据
-    with open(os.path.join(save_path, "summary.txt"), "w") as f:
+    with open(os.path.join(save_path, "summary.txt"), "w", encoding='utf-8') as f:
         f.write(f"总奖励: {episode_reward:.4f}\n")
         f.write(f"步数: {env.horizon}\n")
         # 添加电压违规率统计
@@ -431,7 +431,7 @@ def test_saved_model(model_path, args, load_profile_idx=0, use_plot=True, print_
 
 def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, print_step=False):
     """
-    运行PPO智能体
+    训练PPO智能体并进行测试
     Args:
         args: 命令行参数
         load_profile_idx: 负载配置索引
@@ -497,9 +497,17 @@ def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, pri
         f.write(f"{env.reward_func.power_w},{env.reward_func.cap_w},{env.reward_func.reg_w},"
                 f"{env.reward_func.soc_w},{env.reward_func.dis_w},{env.reward_func.com_w},{env.reward_func.energy_w},"
                 f"{env.reward_func.voltage_w}\n")
-    print(f"奖励函数权重已保存至 {reward_weights_file}")
+    print(f"奖励函数权重已保存至 {reward_weights_file}.")
 
-    test_ppo_agent(model_path=model_path,args=args,load_profile_idx=load_profile_idx,use_plot=use_plot, print_step=print_step)
+    # 保存一些训练设置信息
+    train_env_settings_info_file = os.path.join(save_path, "train_env_settings_info.txt")
+    with open(train_env_settings_info_file, 'w', encoding='utf-8') as f:
+        f.write(f"ev_demand_path: {env.ev_demand_path}")
+        f.write(f"ev_station_bus: {env.ev_station_bus}")
+        f.write(f"ev_charger_num: {env.ev_charger_num}")
+
+    # 测试训练得到的模型
+    test_ppo_agent(model_path=model_path,args=args,load_profile_idx=load_profile_idx,use_plot=use_plot,print_step=print_step)
 
 
 def run_parallel_ppo_agent(args):
