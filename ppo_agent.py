@@ -337,6 +337,27 @@ def test_ppo_agent(model=None, model_path=None, output_dir=None, args=None, load
                                 if env.circuit.dss.ActiveCircuit.Generators.Next == 0:
                                     break
 
+                    # 获取连接到该总线的电容器的功率
+                    if env.circuit.dss.ActiveCircuit.Capacitors.First != 0:
+                        while True:
+                            cap_name = env.circuit.dss.ActiveCircuit.Capacitors.Name
+                            env.circuit.dss.Text.Commands(f"? capacitor.{cap_name}.bus1")
+                            cap_bus = env.circuit.dss.Text.Result.split(".")[0]
+
+                            if cap_bus.lower() == bus_name_dss.lower():
+                                # 设置该电容器为活动元件
+                                env.circuit.dss.ActiveCircuit.SetActiveElement(f"Capacitor.{cap_name}")
+                                powers = env.circuit.dss.ActiveCircuit.ActiveCktElement.Powers
+                                # 电容器主要提供无功功率补偿
+                                if powers is not None and len(powers) > 0:
+                                    for j in range(0, len(powers), 2):
+                                        active_power += powers[j]  # 通常接近0
+                                        if j + 1 < len(powers):
+                                            reactive_power += powers[j + 1]  # 正值表示提供无功功率
+
+                            if env.circuit.dss.ActiveCircuit.Capacitors.Next == 0:
+                                break
+
                 except Exception as e:
                     print(f"获取节点 {bus_name} 功率时出错: {e}. 已设置为零。")
                     active_power, reactive_power = 0, 0
