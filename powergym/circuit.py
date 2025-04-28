@@ -256,12 +256,12 @@ class Circuits:
         #         discharge_errs[i] = max(0.0, batt.avail_kw[batt.state]) / batt.max_kw
         return soc_errs, discharge_errs
 
-    def set_regulator_parameters(self, tap=1.1, mintap=0.9, maxtap=1.1):
+    def set_regulator_parameters(self, tap=1.05, mintap=0.9, maxtap=1.1):
         """
         Set all regulator parameters to the same predefined values
 
         Args:
-           tap: tap value in between mintap and maxtap
+           tap: tap value in between mintap and maxtap（原默认值1.1，会将tap调到1.1，导致我在初始化文件中做的修改无效）
            maxtap: max tap value
            mintap: min tap value
 
@@ -314,6 +314,16 @@ class Circuits:
 
         if not self.dss_act:
             self.dss.Text.Command = "Set ControlMode = off"
+
+        self.dss.ActiveCircuit.Transformers.First
+        while True:
+            if self.dss.ActiveCircuit.Transformers.Next == 0:
+                break
+            else:
+                print(f'{self.dss.ActiveCircuit.Transformers.Tap}')
+
+
+        print('over')
 
     def reset(self):
         """

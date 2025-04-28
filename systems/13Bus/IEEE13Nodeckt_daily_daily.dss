@@ -31,11 +31,12 @@ ctprim=700 - 电流互感器(CT)的额定原边电流，设为700安培。这是
 R=3 X=9 - 线路阻抗补偿参数，单位为伏特。这些值模拟了从调压器到负荷中心的线路上的电压降，使调压器能够根据负载电流调整输出电压，提前补偿线路上的电压降，确保负荷点电压稳定。
 1. vreg和RX的共同设置促成了初始化为1.10。
 2. 设置了不启用dss内置的调节变压器抽头后，默认初始化到1.10的位置就不动了——文档中显示默认tapNum是0来着
+以上猜测均错误，就是因为circuit里初始化过程把tap覆盖设置为1.10
 */
 New Transformer.Reg1 phases=1 XHL=0.01 kVAs=[1666 1666]
 ~ Buses=[650.1 RG60.1] kVs=[2.4  2.4] %LoadLoss=0.01  // 2.4kV phase volt while 4.16kV is line volt
 new regcontrol.Reg1  transformer=Reg1 winding=2  vreg=122  band=2  ptratio=20 ctprim=700  R=3   X=9
-~ TapNum=8 maxtapchange=0 // 指定到1.05的位置并固定
+~ TapNum=8 maxtapchange=0 // 指定到1.05的位置并固定，实际初期有效，但测试过程还是维持在1.10（中间被覆盖设置）
 
 New Transformer.Reg2 phases=1 XHL=0.01 kVAs=[1666 1666]
 ~ Buses=[650.2 RG60.2] kVs=[2.4  2.4] %LoadLoss=0.01
