@@ -167,9 +167,10 @@ def test_ppo_agent(model=None, model_path=None, output_dir=None, args=None, load
     ev_stats_file = os.path.join(save_path, "ev_stats.csv")
     node_powers_file = os.path.join(save_path, "node_powers.csv")
     rewards_file = os.path.join(save_path, "rewards.csv")
+    observations_file = os.path.join(save_path, "observations(next).csv")
 
     # 初始化CSV文件
-    with open(actions_file, 'w') as f:
+    with open(actions_file, 'w', encoding='utf-8') as f:
         header = "step"
         action_dim = env.action_space.shape[0] if hasattr(env.action_space, 'shape') else 1
         for i in range(action_dim):
@@ -196,6 +197,14 @@ def test_ppo_agent(model=None, model_path=None, output_dir=None, args=None, load
 
     with open(rewards_file, 'w', encoding='utf-8') as f:
         f.write("step,总奖励值,电压奖励,功率损耗奖励,控制奖励,完成率奖励,满足率奖励\n")
+
+    # 初始化observations CSV文件
+    with open(observations_file, 'w', encoding='utf-8') as f:
+        header = "step"
+        obs_dim = env.observation_space.shape[0] if hasattr(env.observation_space, 'shape') else 1
+        for i in range(obs_dim):
+            header += f",obs_{i}"
+        f.write(header + "\n")
 
     # 开始测试
     obs, info = env.reset(seed=args.seed, options={'load_profile_idx': load_profile_idx})
@@ -242,6 +251,16 @@ def test_ppo_agent(model=None, model_path=None, output_dir=None, args=None, load
                 # 计算平均电压值
                 voltage_value = sum(bus_voltage_real) / len(bus_voltage_real) if bus_voltage_real else 0
                 line += f",{voltage_value}"
+            f.write(line + "\n")
+
+        # 记录观察值
+        with open(observations_file, 'a') as f:
+            line = f"{i}"
+            if isinstance(obs, np.ndarray):
+                for obs_val in obs:
+                    line += f",{obs_val}"
+            else:
+                line += f",{obs}"
             f.write(line + "\n")
 
         # 记录系统功率
@@ -523,9 +542,9 @@ def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, pri
     # 保存一些训练设置信息
     train_env_settings_info_file = os.path.join(save_path, "train_env_settings_info.txt")
     with open(train_env_settings_info_file, 'w', encoding='utf-8') as f:
-        f.write(f"ev_demand_path: {env.ev_demand_path}")
-        f.write(f"ev_station_bus: {env.ev_station_bus}")
-        f.write(f"ev_charger_num: {env.ev_charger_num}")
+        f.write(f"ev_demand_path: {env.ev_demand_path}\n")
+        f.write(f"ev_station_bus: {env.ev_station_bus}\n")
+        f.write(f"ev_charger_num: {env.ev_charger_num}\n")
 
     # 测试训练得到的模型
     test_ppo_agent(model_path=model_path,args=args,load_profile_idx=load_profile_idx,use_plot=use_plot,print_step=print_step)
