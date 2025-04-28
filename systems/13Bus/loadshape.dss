@@ -13,3 +13,4 @@ New Loadshape.loadshape_652 npts=96 sinterval=900 mult=(file=./loadshape\0000\65
 New Loadshape.loadshape_670a npts=96 sinterval=900 mult=(file=./loadshape\0000\670a.csv)
 New Loadshape.loadshape_670b npts=96 sinterval=900 mult=(file=./loadshape\0000\670b.csv)
 New Loadshape.loadshape_670c npts=96 sinterval=900 mult=(file=./loadshape\0000\670c.csv)
+New Loadshape.loadshape_PV1 npts=96 sinterval=900 mult=(file=./loadshape\0000\PV1.csv)

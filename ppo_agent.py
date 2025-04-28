@@ -196,7 +196,7 @@ def test_ppo_agent(model=None, model_path=None, output_dir=None, args=None, load
         f.write(header + "\n")
 
     with open(rewards_file, 'w', encoding='utf-8') as f:
-        f.write("step,总奖励值,电压奖励,功率损耗奖励,控制奖励,完成率奖励,满足率奖励\n")
+        f.write("step,总奖励值,电压奖励,功率损耗奖励,控制奖励,完成率奖励,满足率奖励,变压器容量奖励\n")
 
     # 初始化observations CSV文件
     with open(observations_file, 'w', encoding='utf-8') as f:
@@ -237,8 +237,9 @@ def test_ppo_agent(model=None, model_path=None, output_dir=None, args=None, load
             t_reward = info.get('Control_reward', 0)
             c_reward = info.get('Completion_reward', 0)
             e_reward = info.get('Energy_reward', 0)
+            tf_reward = info.get('Transformer_reward', 0)
 
-            f.write(f"{i},{reward},{v_reward},{p_reward},{t_reward},{c_reward},{e_reward}\n")
+            f.write(f"{i},{reward},{v_reward},{p_reward},{t_reward},{c_reward},{e_reward},{tf_reward}\n")
 
         # 记录各节点电压——无法直接通过obs进行，step传出的obs是展为数组的
         with open(voltages_file, 'a') as f:

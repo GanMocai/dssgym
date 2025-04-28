@@ -294,21 +294,25 @@ _STATION_INFO = {
     '13Bus': {
         'bus_name': '680',  # 充电站连接的母线名称
         'num_chargers': 10,  # 充电桩数量
+        'transformer_kVA': 800, # 设定专变的容量
         # 'ev_price': '13Bus_ev_price.csv',  # 电价文件
     },
     '34Bus': {
         'bus_name': '',  # 充电站连接的母线名称
         'num_chargers': 10,  # 充电桩数量
+        'transformer_kVA': 800, # 设定专变的容量
         # 'ev_price': '13Bus_ev_price.csv',  # 电价文件
     },
     '123Bus': {
         'bus_name': '',  # 充电站连接的母线名称
         'num_chargers': 10,  # 充电桩数量
+        'transformer_kVA': 800,  # 设定专变的容量
         # 'ev_price': '13Bus_ev_price.csv',  # 电价文件
     },
     '8500-Node': {
         'bus_name': '',  # 充电站连接的母线名称
         'num_chargers': 10,  # 充电桩数量
+        'transformer_kVA': 800,  # 设定专变的容量
         # 'ev_price': '13Bus_ev_price.csv',  # 电价文件
     }
 }
@@ -352,6 +356,7 @@ for env in _ENV_INFO.keys():
     _ENV_INFO[env]['energy_w'] = 10
     # 显式设置电压越限惩罚权重
     _ENV_INFO[env]['voltage_w'] = 10
+    _ENV_INFO[env]['tf_capacity_w'] = 10
 
 
 # %% 函数

@@ -151,7 +151,7 @@ class Circuits:
                         kw = batt.state_projection(nkws_or_states[idx_in_nkws_or_states])
                         kvar = kw * np.tan(np.arccos(batt.pf))
                         bat2kwkvar[batt.name[8:]] = (kw, kvar)
-        # # 原设置电池对象——把AI带歪了……
+        # # 原设置电池对象——使用功率因数进行计算的方式有问题，把AI带歪了
         # bat2kwkvar = dict()
         # for i, bat in enumerate(self.batteries.keys()):  # 索引，key
         #     batt = self.batteries[bat]
@@ -169,7 +169,7 @@ class Circuits:
                     kw, kvar = bat2kwkvar[dssGen.Name]
                     dssGen.kW = kw
                     dssGen.kvar = kvar
-                    print(f'已在 set_all_batteries_before_solve 中设置 {dssGen.Name} 消耗的有无功功率为 {-dssGen.kW}, {-dssGen.kvar}')
+                    print(f'已在 set_all_batteries_before_solve 中设置 {dssGen.Name} 充电的有无功功率为 {-dssGen.kW}, {-dssGen.kvar}')
                 if dssGen.Next == 0:  # 没有下一个这类对象
                     break
 
@@ -314,16 +314,6 @@ class Circuits:
 
         if not self.dss_act:
             self.dss.Text.Command = "Set ControlMode = off"
-
-        self.dss.ActiveCircuit.Transformers.First
-        while True:
-            if self.dss.ActiveCircuit.Transformers.Next == 0:
-                break
-            else:
-                print(f'{self.dss.ActiveCircuit.Transformers.Tap}')
-
-
-        print('over')
 
     def reset(self):
         """
@@ -1092,6 +1082,7 @@ class Battery(Node):
         return soc_err, discharge_err
 
     def actual_power(self):
+        # 返回当前电池充电的有功功率，负号代表是放电
         # get the actual power computed by dss in [-kw, -kvar] in dss, the minus means power generation
         # actual_power < 0 means discharging （和 opendss 内置的 storage 相反）
         try:
@@ -1276,7 +1267,7 @@ class BatteryController:
             'battery_name': bat_name,
             'stored_energy': stored_energy,
             'soc_percent': soc_percent,
-            'charging_power': -actual_power,  # 转换为充电功率表示（负为放电）
+            'charging_power': actual_power,  # 转换为充电功率表示（负为放电actual_power本身就是负为电池放电）
             'actual_power': actual_power,
             'voltage_pu': voltage_pu,
             'rated_power': battery.max_kw,
@@ -1477,7 +1468,7 @@ class BatteryStationManager:
 
     def __init__(self, circuit, bus, num_connection_points, arrival, departure,
                  max_power, initial_soc, target_soc, capacity,
-                 battery_names=None, total_steps=96):
+                 battery_names=None, total_steps=96, EV_PF=-0.98):
         """
         Args:
             circuit: Circuits对象，电力系统实例
@@ -1494,6 +1485,7 @@ class BatteryStationManager:
         """
         # 保存电力系统仿真对象引用
         self.circuit = circuit
+        self.EV_PF = EV_PF
 
         # 验证输入参数
         self.battery_count = len(arrival)
@@ -1619,7 +1611,8 @@ class BatteryStationManager:
                         bus=self.bus,
                         max_kw=self.max_power[idx],
                         max_kwh=self.capacity[idx],
-                        initial_soc=self.initial_soc[idx]
+                        initial_soc=self.initial_soc[idx],
+                        pf=self.EV_PF
                     )
                     # 更新已连接电池列表
                     self.connected_batteries[idx] = name
@@ -1743,7 +1736,8 @@ class BatteryStationManager:
                 bus=bus,
                 max_kw=self.max_power[idx],
                 max_kwh=self.capacity[idx],
-                initial_soc=self.initial_soc[idx]
+                initial_soc=self.initial_soc[idx],
+                pf=self.EV_PF
             )
 
             # 计算等待时间并更新统计

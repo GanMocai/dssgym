@@ -394,6 +394,7 @@ class Env(gym.Env):
         self.station_bus = info['bus_name']  # 充电站连接的母线名称
         print(f"环境初始化中，充电站链接母线为 {self.station_bus}")
         # 创建充电站
+        self.station_transformer_capacity = info['transformer_kVA']  # 专变容量
         self.ev_demand_path = info['ev_demand']  # 用于保存到训练信息
         self.ev_station_bus = info['bus_name']   # 用于保存到训练信息
         self.ev_charger_num = info['num_chargers']  # 用于保存到训练信息
@@ -493,6 +494,7 @@ class Env(gym.Env):
             self.com_w = info['completion_w']
             self.energy_w = info['energy_w']
             self.voltage_w = info['voltage_w']
+            self.tf_capacity_w = info['tf_capacity_w']
 
         def powerloss_reward(self):
             # Penalty for power loss of entire system at one time step
@@ -534,6 +536,31 @@ class Env(gym.Env):
                     violated_nodes.append(name)
             return total_violation*self.voltage_w, violated_nodes
 
+        def tf_reward(self):
+            # 变压器裕度奖励，超出容量上限则给出巨额惩罚
+            tf_kVA = self.env.station_transformer_capacity
+            ev_kW = self.env.obs['ev_charging_power']
+            ev_kVar = ev_kW * np.tan(np.arccos(self.env.ev_station.EV_PF))
+            storage_kW = sum([bat.actual_power() for name, bat in self.env.circuit.storage_batteries.items() if
+                              name in self.env.bat_names[:self.env.sto_num]])
+            storage_kVar = sum(
+                [bat.actual_power() * np.tan(np.arccos(bat.pf)) for name, bat in self.env.circuit.storage_batteries.items() if
+                 name in self.env.bat_names[:self.env.sto_num]])
+            PV_kW = sum(load.feature[1] for key, load in self.env.circuit.loads.items() if "PV" in key and load.bus == self.env.ev_station_bus)  # feature0 kV,1 kW, 2 kVar
+            PV_kVar = sum(load.feature[2] for key, load in self.env.circuit.loads.items() if "PV" in key and load.bus == self.env.ev_station_bu)
+            total_kW = ev_kW + storage_kW + PV_kW
+            total_kVar = ev_kVar + storage_kVar + PV_kVar
+            total_kVA = np.sqrt(total_kW ** 2 + total_kVar ** 2)
+            remain_kVA = 0.75 * tf_kVA - total_kVA
+            if total_kVA > tf_kVA:
+                print("超出上限")
+                return 1000 * self.tf_capacity_w * remain_kVA
+            elif total_kVA > 0.75 * tf_kVA:
+                print("不太安全")
+                return self.tf_capacity_w * remain_kVA
+            else:
+                return 0
+
         def composite_reward(self, cd, rd, soc, dis, full=True, record_node=False):
             # the main reward function
             p = self.powerloss_reward()
@@ -541,14 +568,16 @@ class Env(gym.Env):
             t = self.ctrl_reward(cd, rd, soc, dis)
             c = self.completion_reward()  # 添加充电完成率奖励
             e = self.energy_reward()
-            total_reward = p + v + t + c + e
+            tf = self.tf_reward()
+
+            total_reward = p + v + t + c + e + tf
 
             info = dict() if not record_node else {'violated_nodes': vio_nodes}
             if full:
                 info.update({'power_loss_ratio': -p / self.power_w,
-                             'PowerLoss_reward': p, 'Voltage_reward': v, 'Control_reward': t, 'Completion_reward': c, 'Energy_reward': e})
+                             'PowerLoss_reward': p, 'Voltage_reward': v, 'Control_reward': t, 'Completion_reward': c, 'Energy_reward': e, 'Transformer_reward': tf})
 
-            print(f"奖励各子项的值：p: {p}, v: {v}, t: {t}, c: {c}, e: {e}.")
+            print(f"奖励各子项的值：p: {p}, v: {v}, t: {t}, c: {c}, e: {e}, tf: {tf}.")
 
             return total_reward, info
 
