@@ -187,7 +187,7 @@ def test_ppo_agent(model=None, model_path=None, output_dir=None, args=None, load
         f.write("step,P,Q,PowerLoss,PowerFactor\n")
 
     with open(ev_stats_file, 'w', encoding='utf-8') as f:
-        f.write("step,连接率,充电功率,成功率,平均满足率\n")
+        f.write("step,连接率,充电功率,总连接数,成功率,平均满足率\n")
 
     with open(node_powers_file, 'w') as f:
         header = "step"
@@ -195,8 +195,11 @@ def test_ppo_agent(model=None, model_path=None, output_dir=None, args=None, load
             header += f",{bus_name}_P,{bus_name}_Q"
         f.write(header + "\n")
 
-    with open(rewards_file, 'w', encoding='utf-8') as f:
-        f.write("step,总奖励值,电压奖励,功率损耗奖励,控制奖励,完成率奖励,满足率奖励,变压器容量奖励\n")
+    with open(rewards_file, 'w', encoding='utf-8') as f:  # 优化逻辑，便于后续再做修改
+        header = 'step,total_reward'
+        for component in env.reward_func.components:
+            header += f",{component}"
+        f.write(header + "\n")
 
     # 初始化observations CSV文件
     with open(observations_file, 'w', encoding='utf-8') as f:
@@ -220,7 +223,7 @@ def test_ppo_agent(model=None, model_path=None, output_dir=None, args=None, load
             print(f"进程 {worker_idx}, Step {i}\n"
                   f"Action: {action}, Obs: {obs}, Reward: {reward:.4f}, Done: {done}, Info: {info}.")
 
-        # 在每步记录动作
+        # 记录智能体输出动作
         with open(actions_file, 'a') as f:
             line = f"{i}"
             if isinstance(action, np.ndarray):
@@ -230,16 +233,10 @@ def test_ppo_agent(model=None, model_path=None, output_dir=None, args=None, load
                 line += f",{action}"
             f.write(line + "\n")
 
-        # 记录奖励函数详情
+        # 记录奖励及其子项
         with open(rewards_file, 'a') as f:
-            v_reward = info.get('Voltage_reward', 0)
-            p_reward = info.get('PowerLoss_reward', 0)
-            t_reward = info.get('Control_reward', 0)
-            c_reward = info.get('Completion_reward', 0)
-            e_reward = info.get('Energy_reward', 0)
-            tf_reward = info.get('Transformer_reward', 0)
-
-            f.write(f"{i},{reward},{v_reward},{p_reward},{t_reward},{c_reward},{e_reward},{tf_reward}\n")
+            reward_components = [info.get(comp, 0) for comp in env.reward_func.components]
+            f.write(f"{i},{reward}" + "".join([f",{rc}" for rc in reward_components]) + "\n")
 
         # 记录各节点电压——无法直接通过obs进行，step传出的obs是展为数组的
         with open(voltages_file, 'a') as f:
@@ -254,7 +251,7 @@ def test_ppo_agent(model=None, model_path=None, output_dir=None, args=None, load
                 line += f",{voltage_value}"
             f.write(line + "\n")
 
-        # 记录观察值
+        # 记录所有观察值
         with open(observations_file, 'a') as f:
             line = f"{i}"
             if isinstance(obs, np.ndarray):
@@ -278,12 +275,13 @@ def test_ppo_agent(model=None, model_path=None, output_dir=None, args=None, load
 
         # 记录EV充电站统计数据
         with open(ev_stats_file, 'a') as f:
-            connection_rate = env.obs.get('ev_connection_rate', 0) if hasattr(env, 'obs') else 0
-            charging_power = env.obs.get('ev_charging_power', 0) if hasattr(env, 'obs') else 0
-            success_rate = env.obs.get('ev_success_rate', 0) if hasattr(env, 'obs') else 0
-            avg_target_achieved = env.obs.get('avg_target_achieved', 0) if hasattr(env, 'obs') else 0
+            connection_rate = env.obs.get('ev_connection_rate', 0)
+            charging_power = env.obs.get('ev_charging_power', 0)
+            connected_count = env.obs.get('ev_connected_count', 0)
+            success_rate = env.obs.get('ev_success_rate', 0)
+            avg_target_achieved = env.obs.get('avg_target_achieved', 0)
 
-            f.write(f"{i},{connection_rate},{charging_power},{success_rate},{avg_target_achieved}\n")
+            f.write(f"{i},{connection_rate},{charging_power},{connected_count},{success_rate},{avg_target_achieved}\n")
 
         # 记录各节点的功率 - 从连接总线的负荷和发电设备获取功率
         with open(node_powers_file, 'a') as f:
@@ -534,9 +532,9 @@ def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, pri
     # 保存奖励函数权重
     reward_weights_file = os.path.join(save_path, "reward_weights.csv")
     with open(reward_weights_file, 'w', encoding='utf-8') as f:
-        f.write("power_w,cap_w,reg_w,soc_w,dis_w,com_w,energy_w,voltage_w\n")
+        f.write("power_w,cap_w,reg_w,soc_w,dis_w,con_w,com_w,energy_w,voltage_w\n")
         f.write(f"{env.reward_func.power_w},{env.reward_func.cap_w},{env.reward_func.reg_w},"
-                f"{env.reward_func.soc_w},{env.reward_func.dis_w},{env.reward_func.com_w},{env.reward_func.energy_w},"
+                f"{env.reward_func.soc_w},{env.reward_func.dis_w},{env.reward_func.con_w},{env.reward_func.com_w},{env.reward_func.energy_w},"
                 f"{env.reward_func.voltage_w}\n")
     print(f"奖励函数权重已保存至 {reward_weights_file}.")
 

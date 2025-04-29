@@ -353,6 +353,7 @@ for env in _ENV_INFO.keys():
     _ENV_INFO[env].update(_EV_INFO[sys])
     # 在info中添加充电站相关充电完成率的权重
     _ENV_INFO[env]['completion_w'] = 10
+    _ENV_INFO[env]['connection_w'] = 10
     _ENV_INFO[env]['energy_w'] = 10
     # 显式设置电压越限惩罚权重
     _ENV_INFO[env]['voltage_w'] = 10

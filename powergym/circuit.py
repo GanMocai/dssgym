@@ -1854,11 +1854,11 @@ class BatteryStationManager:
             self.stats['net_energy'] = self.stats['total_charge'] - self.stats['total_discharge']
 
         elif update_type == 'summary':  # 更新总体统计数据，通常在时间步结束时调用
-            # 更新当前充电功率
+            # 更新当前总充电功率
             total_charging_power = 0
             for idx, name in self.connected_batteries.items():
                 bat_status = self.controller.get_battery_status(name)
-                if bat_status and bat_status['actual_power'] < 0:  # 充电为负值
+                if bat_status:  # 移除符号判断，搞得之前都没成功统计过，容量约束白瞎了
                     total_charging_power += abs(bat_status['actual_power'])
             self.stats['current_charging_power'] = total_charging_power
 

@@ -444,18 +444,18 @@ class Env(gym.Env):
             nload = len(self.obs['load_profile_t'])
 
         if self.wrap_observation:
-            low, high = [0.8] * nnode, [1.2] * nnode  # add voltage bound  最开始是[0.8,1.2]
+            low, high = [0.8] * nnode, [1.2] * nnode  # add voltage bound  节点电压标幺值
             print(f"\n电压边界维度: {nnode}")
-            low, high = low + [0] * self.cap_num, high + [1] * self.cap_num  # add cap bound
+            low, high = low + [0] * self.cap_num, high + [1] * self.cap_num  # add cap bound 电容投切
             print(f"电容边界维度: {self.cap_num}")
-            low, high = low + [0] * self.reg_num, high + [self.reg_act_num] * self.reg_num  # add reg bound
+            low, high = low + [0] * self.reg_num, high + [self.reg_act_num] * self.reg_num  # add reg bound 抽头
             print(f"Regulator边界维度: {self.reg_num}")
-            low, high = low + [0, -1] * self.bat_num, high + [1, 1] * self.bat_num  # add bat bound
+            low, high = low + [0, -1] * self.bat_num, high + [1, 1] * self.bat_num  # add bat bound (SOC, 功率)
             print(f"电池边界维度: {self.bat_num * 2}")
 
             # 添加充电站实时指标维度
-            low, high = low + [0.0, 0.0, 0.0, 0.0], high + [1.0, float('inf'), 1.0, float('inf')]  # 连接率,充电功率,成功率,平均能量满足率
-            print(f"EV station metrics dimension: 4")
+            low, high = low + [0.0, 0.0, 0.0, 0.0, 0.0], high + [1.0, float('inf'), float('inf'), 1.0, float('inf')]  # 连接率,充电功率,成功率,平均能量满足率
+            print(f"EV station metrics dimension: 5")
 
             if observe_load:
                 low, high = low + [0.0] * nload, high + [1.0] * nload  # add load bound
@@ -492,9 +492,13 @@ class Env(gym.Env):
             self.soc_w = info['soc_w']
             self.dis_w = info['dis_w']
             self.com_w = info['completion_w']
+            self.con_w = info['connection_w']
             self.energy_w = info['energy_w']
             self.voltage_w = info['voltage_w']
             self.tf_capacity_w = info['tf_capacity_w']
+            # 添加组成部分列表，便于后续记录
+            self.components = ['PowerLoss_reward', 'Voltage_reward', 'Control_reward',
+                             'Connection_reward', 'Completion_reward', 'Energy_reward', 'Transformer_reward']
 
         def powerloss_reward(self):
             # Penalty for power loss of entire system at one time step
@@ -519,6 +523,10 @@ class Env(gym.Env):
         def completion_reward(self):
             # 完成率奖励
             return max(0.0, self.env.obs['ev_success_rate']) * self.com_w
+
+        def connection_reward(self):
+            # 连接数奖励
+            return self.env.obs['ev_connected_count'] * self.con_w
 
         def energy_reward(self):
             # 能量满足率奖励
@@ -566,18 +574,20 @@ class Env(gym.Env):
             p = self.powerloss_reward()
             v, vio_nodes = self.voltage_reward(record_node)
             t = self.ctrl_reward(cd, rd, soc, dis)
-            c = self.completion_reward()  # 添加充电完成率奖励
+            con = self.connection_reward()
+            com = self.completion_reward()  # 添加充电完成率奖励
             e = self.energy_reward()
             tf = self.tf_reward()
 
-            total_reward = p + v + t + c + e + tf
+            total_reward = p + v + t + con + com + e + tf
 
             info = dict() if not record_node else {'violated_nodes': vio_nodes}
             if full:
                 info.update({'power_loss_ratio': -p / self.power_w,
-                             'PowerLoss_reward': p, 'Voltage_reward': v, 'Control_reward': t, 'Completion_reward': c, 'Energy_reward': e, 'Transformer_reward': tf})
+                             'PowerLoss_reward': p, 'Voltage_reward': v, 'Control_reward': t,
+                             'Connection_reward': con, 'Completion_reward': com, 'Energy_reward': e, 'Transformer_reward': tf})
 
-            print(f"奖励各子项的值：p: {p}, v: {v}, t: {t}, c: {c}, e: {e}, tf: {tf}.")
+            print(f"奖励各项的值：p: {p}, v: {v}, t: {t}, con: {con}, com: {com}, e: {e}, tf: {tf}.")
 
             return total_reward, info
 
@@ -681,11 +691,13 @@ class Env(gym.Env):
         if hasattr(self, 'ev_station') and self.ev_station is not None:
             self.obs['ev_connection_rate'] = self.ev_station.stats['current_connection_rate']
             self.obs['ev_charging_power'] = self.ev_station.stats['current_charging_power']
+            self.obs['ev_connected_count'] = self.ev_station.stats['connected_count']
             self.obs['ev_success_rate'] = self.ev_station.stats['current_success_rate']
             self.obs['avg_target_achieved'] = self.ev_station.stats['avg_target_achieved']
         else:
             self.obs['ev_connection_rate'] = 0.0
             self.obs['ev_charging_power'] = 0.0
+            self.obs['ev_connected_count'] = 0
             self.obs['ev_success_rate'] = 0.0
             self.obs['avg_target_achieved'] = 0.0
 
@@ -823,11 +835,13 @@ class Env(gym.Env):
         if hasattr(self, 'ev_station') and self.ev_station is not None:
             self.obs['ev_connection_rate'] = self.ev_station.stats['current_connection_rate']
             self.obs['ev_charging_power'] = self.ev_station.stats['current_charging_power']
+            self.obs['ev_connected_count'] = self.ev_station.stats['connected_count']
             self.obs['ev_success_rate'] = self.ev_station.stats['current_success_rate']
             self.obs['avg_target_achieved'] = self.ev_station.stats['avg_target_achieved']
         else:
             self.obs['ev_connection_rate'] = 0.0
             self.obs['ev_charging_power'] = 0.0
+            self.obs['ev_connected_count'] = 0.0
             self.obs['ev_success_rate'] = 0.0
             self.obs['avg_target_achieved'] = 0.0
 
@@ -910,7 +924,7 @@ class Env(gym.Env):
         key_obs = ['bus_voltages', 'cap_statuses', 'reg_statuses', 'bat_statuses']
 
         # 添加充电站实时指标
-        ev_metrics = ['ev_connection_rate', 'ev_charging_power', 'ev_success_rate', 'avg_target_achieved']
+        ev_metrics = ['ev_connection_rate', 'ev_charging_power', 'ev_connected_count', 'ev_success_rate', 'avg_target_achieved']
 
         if self.observe_load:
             key_obs.append('load_profile_t')
