@@ -237,6 +237,9 @@ class Circuits:
                         batt.kwh += batt.actual_power() * batt.duration
                         batt.kwh = round(max(0.0, min(batt.max_kwh, batt.kwh)), 2)
                         batt.soc = batt.kwh / batt.max_kwh
+                        if hasattr(self.ev_controller, 'bms_instances') and full_name in self.ev_controller.bms_instances:
+                            bms = self.ev_controller.bms_instances[full_name]
+                            bms.set_soc(batt.soc)  # 及时更新soc
                         soc_errs[idx_in_bat_errs] = abs(batt.soc - batt.initial_soc)
 
                         if self.bat_act_num == np.inf:

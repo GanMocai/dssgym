@@ -44,6 +44,8 @@ class EVBMS:
         self.current_soc = initial_soc  # 当前电量百分比
         self.charge_protocol = charge_protocol  # 充电协议
 
+        self.charger_power = None
+
         # 充电历史记录
         self.charging_history = []
         self.time_segment_counter = 0  # 时间段序号计数器
@@ -170,6 +172,11 @@ class EVBMS:
         返回:
             计算后的充电功率(kW)
         """
+        if self.charger_power is None:
+            self.charger_power = charger_power
+        else:
+            charger_power = self.charger_power
+            print('已有历史设置charger_power，设置charger_power失败。')
         # 考虑充电桩功率限制与电池最大接受功率的较小值
         power = min(charger_power, self.max_battery_charge_power)
 
