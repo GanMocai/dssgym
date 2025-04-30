@@ -257,11 +257,11 @@ def generate_ev_demand(num_evs, base_path, seed=None):
 
     for i in range(num_evs):  # 按单辆生成
         # 生成到达时间
-        arrive_time = int(np.random.choice(arrival_values, p=arrival_dist))
+        arrive_time = min(int(np.random.choice(arrival_values, p=arrival_dist)), 96-1)  # 避免最后一个时间段的来车
 
-        # 生成停留时间（小时）
+        # 生成停留时间
         stay_duration = np.random.choice(duration_values, p=duration_dist)
-        depart_time = min(arrive_time + stay_duration, 96)  # 每小时4个时间段，最大不超过96
+        depart_time = min(arrive_time + stay_duration, 96)  # 最大不超过96
 
         # 生成电池容量和充电功率
         power_support = np.random.choice(power_levels, p=power_probs)
@@ -277,7 +277,7 @@ def generate_ev_demand(num_evs, base_path, seed=None):
         start_soc = np.random.choice(start_soc_values, p=start_soc_dist) / 100  # 转换为0-1范围
         end_soc = np.random.choice(end_soc_values, p=end_soc_dist) / 100  # 转换为0-1范围
 
-        # 确保终止SOC大于起始SOC，同时小于
+        # 确保终止SOC大于起始SOC，同时小于1
         end_soc = min(max(end_soc, start_soc + 0.2), 1)
 
         # 截取SOC
@@ -288,7 +288,12 @@ def generate_ev_demand(num_evs, base_path, seed=None):
         energy_demand = battery_capacity * (end_soc - start_soc)
 
         # 充电曲线类型
-        curve_type = np.random.randint(0, 3)
+        if power_support >= 100:
+            curve_type = np.random.choice([0, 1, 2], p=[0.8, 0.1, 0.1])
+        elif power_support == 80:
+            curve_type = np.random.choice([0, 1, 2], p=[0.1, 0.8, 0.1])
+        else:
+            curve_type = np.random.choice([0, 1, 2], p=[0.1, 0.1, 0.8])
 
         # 计算所需的充电时间（以15分钟时段计）
         power_coefficient = 1.0 if curve_type == 0 else (0.85 if curve_type == 1 else 0.9)
@@ -368,6 +373,6 @@ if __name__ == '__main__':
 
     # 3. 转换为DataFrame并保存为CSV文件
     ev_df = pd.DataFrame.from_dict(ev_demand, orient='index')
-    csv_file = os.path.join(os.getcwd(), f"ev_demand-{dist_scenario}-{Num_EVs}.csv")
+    csv_file = os.path.join(os.getcwd(), f"ev_demand-{dist_scenario}-{Num_EVs}-A95.csv")
     ev_df.to_csv(csv_file, index=False)
     print(f"EV需求数据已保存至 {csv_file}")

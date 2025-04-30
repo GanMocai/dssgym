@@ -320,7 +320,7 @@ _STATION_INFO = {
 # 充电需求队列信息
 _EV_INFO = {
     '13Bus': {
-        'ev_demand': r'D:\LENOVO\Documents\Python\ML\powergym\ev_demand\ev_demand-public_parking-general-250.csv',  # 充电需求文件
+        'ev_demand': r'D:\LENOVO\Documents\Python\ML\powergym\ev_demand\ev_demand-public_parking-general-250-A95.csv',  # 充电需求文件
     },
     '34Bus': {
         'ev_demand': '34Bus_ev_demand.csv',  # 充电需求文件
@@ -353,7 +353,7 @@ for env in _ENV_INFO.keys():
     _ENV_INFO[env].update(_EV_INFO[sys])
     # 在info中添加充电站相关充电完成率的权重
     _ENV_INFO[env]['completion_w'] = 10
-    _ENV_INFO[env]['connection_w'] = 10
+    _ENV_INFO[env]['connection_w'] =2 * 10/250  # 按EV总数目归一化，同时又突出重要性
     _ENV_INFO[env]['energy_w'] = 10
     # 显式设置电压越限惩罚权重
     _ENV_INFO[env]['voltage_w'] = 10
