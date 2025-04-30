@@ -39,6 +39,8 @@ import pandas as pd
 from pathlib import Path
 from collections import deque
 
+from powergym.powergym.ev_bms import EVBMS
+
 
 class Circuits:
     """Circuits 类：电力系统的核心管理类
@@ -120,7 +122,7 @@ class Circuits:
             if bat_name in self.batteries:  # 确保电池存在
                 batt = self.batteries[bat_name]
                 kw = batt.state_projection(nkws_or_states[i])  # projection
-                kvar = kw / batt.pf
+                kvar = kw * np.tan(np.arccos(batt.pf))
                 bat2kwkvar[batt.name[8:]] = (kw, kvar)  # remove the header 'Battery.'
 
         # 2. 处理EV电池
@@ -148,7 +150,10 @@ class Circuits:
 
                     if full_name in self.batteries:
                         batt = self.batteries[full_name]
-                        kw = batt.state_projection(nkws_or_states[idx_in_nkws_or_states])
+                        kw = batt.state_projection(nkws_or_states[idx_in_nkws_or_states])  # 提供的kW容量
+                        if hasattr(self.ev_controller, 'bms_instances') and full_name in self.ev_controller.bms_instances:
+                            bms = self.ev_controller.bms_instances[full_name]
+                            kw = -bms.calculate_charge_power(-kw)  # 时刻注意符号变换
                         kvar = kw * np.tan(np.arccos(batt.pf))
                         bat2kwkvar[batt.name[8:]] = (kw, kvar)
         # # 原设置电池对象——使用功率因数进行计算的方式有问题，把AI带歪了
@@ -686,7 +691,7 @@ class Circuits:
                 feature = batts[name]
                 dssGen.kW = 0.0  # initialize in disconnected mode
                 dssGen.PF = feature.pf
-                dssGen.kvar = feature.max_kw / feature.pf
+                dssGen.kvar = feature.max_kw * np.tan(np.arccos(feature.pf))
 
                 BusNames = self.dss.ActiveCircuit.CktElements.BusNames[0].split('.')
                 bus = BusNames[0]
@@ -1054,7 +1059,7 @@ class Battery(Node):
         while True:
             if dssGen.Name == name:
                 dssGen.kW = kw
-                dssGen.kvar = kw / self.pf
+                dssGen.kvar = kw * np.tan(np.arccos(self.pf))
                 break
             if dssGen.Next == 0:
                 break
@@ -1106,7 +1111,7 @@ class Battery(Node):
 
 class BatteryController:
     """
-    EV电池的连接/断开和功率控制类，也控制储能电池。定位上脱离
+    EV电池的连接/断开和功率控制类(站的充电控制而非电池的充电控制)，也控制储能电池。
     """
 
     def __init__(self, circuit):
@@ -1116,13 +1121,14 @@ class BatteryController:
         self.active_batteries = {}  # 当前激活的电池 {name: Battery对象}
         self.battery_configs = {}  # 所有电池配置信息 {name: pd.Series}
         self.battery_history = {}  # 电池运行历史记录
+        self.bms_instances = {}  # EV电池的BMS对象 {name: EV_BMS对象}  可以注释以移除BMS
 
         # 添加对已有电池的管理
         for bat_name, battery in circuit.batteries.items():
             self.active_batteries[bat_name] = battery
             self.battery_history[bat_name] = []
 
-    def connect_battery(self, name, bus, max_kw=100, max_kwh=100, initial_soc=0.2, pf=-0.98):
+    def connect_battery(self, name, bus, max_kw=100, max_kwh=100, initial_soc=0.2, pf=-0.98, curve_type:int=0):
         """连接指定的电池或创建新电池，借助 circuit.add_batteries
         Args:
             name (str): 电池名称，或者说电动汽车编号
@@ -1131,6 +1137,7 @@ class BatteryController:
             max_kwh (float): 最大能量（kWh）
             initial_soc (float): 初始SOC（0-1之间）
             pf (float): 功率因数
+            curve_type (int): 曲线类型
         Returns:
             str: 电池名称
         """
@@ -1174,11 +1181,23 @@ class BatteryController:
         self.active_batteries[bat_name] = self.circuit.batteries[bat_name]
         self.battery_history[bat_name] = []
 
-        print(f"已连接电池: {name}, 初始SOC: {initial_soc * 100}%, 最大功率: {max_kw}kW, 电池容量: {max_kwh}kWh")
+        has_bms = ''
+        if hasattr(self, 'bms_instances'):
+            # 创建EVBMS实例并添加到管理列表
+            bms = EVBMS(
+                battery_capacity=max_kwh,
+                max_battery_charge_power=max_kw,
+                initial_soc=initial_soc,
+                charge_protocol=curve_type  # 使用传入的充电曲线类型
+            )
+            self.bms_instances[bat_name] = bms
+            has_bms = '，并创BMS'
+
+        print(f"已连接电池 {name}, 初始SOC: {initial_soc * 100}%, 最大功率: {max_kw}kW, 电池容量: {max_kwh}kWh{has_bms}。")
         return name
 
     def disconnect_battery(self, name):
-        """断开指定的电池并移除
+        """断开指定的电池，移除相应的管理。
         Args:
             name (str): 电池名称（默认情况下电动汽车编号evxxx）
         Returns:
@@ -1195,6 +1214,10 @@ class BatteryController:
             if bat_name in self.circuit.batteries:
                 del self.circuit.batteries[bat_name]
 
+            # 移除BMS实例
+            if hasattr(self, 'bms_instances') and bat_name in self.bms_instances:
+                del self.bms_instances[bat_name]
+
             # 从管理列表中移除
             del self.active_batteries[bat_name]
             print(f"已断开电池: {name}")
@@ -1204,10 +1227,10 @@ class BatteryController:
             return False
 
     def set_battery_power(self, name, power_kw):
-        """直接设置电池功率 (正值表示放电，负值表示充电)
+        """设置电池连接的充电桩提供的功率上限 (正值表示放电，负值表示充电)
         Args:
             name (str): 电池名称
-            power_kw (float): 功率（kW）
+            power_kw (float): 放电功率（kW）
 
         Returns:
             bool: 是否成功设置功率
@@ -1215,13 +1238,17 @@ class BatteryController:
         bat_name = f"Battery.{name}" if not name.startswith("Battery.") else name
 
         if bat_name not in self.active_batteries:
-            print(f"电池 {name} 不存在或已断开")
+            print(f"错误，电池 {name} 未连接。")
             return False
 
         battery = self.active_batteries[bat_name]
 
-        # 限制功率在额定范围内
-        if abs(power_kw) > battery.max_kw:
+        # 通过EVBMS计算实际功率
+        if hasattr(self, 'bms_instances') and bat_name in self.bms_instances:
+            bms = self.bms_instances[bat_name]
+            # 使用BMS计算实际功率（负值表示充电，传入负值的相反数作为充电功率，传出仍要为负值以作为电池的设置）
+            power_kw = -bms.calculate_charge_power(charger_power=-power_kw)
+        elif abs(power_kw) > abs(battery.max_kw): # 限制功率在额定范围内
             original_power = power_kw
             power_kw = battery.max_kw if power_kw > 0 else -battery.max_kw
             print(f"功率设置{original_power}kW超出额定值{battery.max_kw}kW，已调整为{power_kw}kW")
@@ -1254,7 +1281,7 @@ class BatteryController:
         stored_energy = battery.kwh
         soc_percent = battery.soc * 100
 
-        # 获取实际功率
+        # 获取dss中的实际功率
         actual_power = battery.actual_power()
 
         # 获取电压信息
@@ -1279,7 +1306,6 @@ class BatteryController:
     def update_all_before_solve(self):
         """更新所有电池状态(求解前)，未实际实现"""
         # 这个方法用于与circuit.set_all_batteries_before_solve协同工作
-        # 不需要实际操作，因为每个电池的功率设置已在set_battery_power中完成
         pass
 
     def update_all_after_solve(self):
@@ -1301,6 +1327,9 @@ class BatteryController:
                 prev_status = history[-1]['status']
                 energy_diff = status['stored_energy'] - prev_status['stored_energy']
                 soc_diff = status['soc_percent'] - prev_status['soc_percent']
+                if hasattr(self, 'bms_instances') and bat_name in self.bms_instances:
+                    bms = self.bms_instances[bat_name]
+                    bms.set_soc(status['soc_percent'])  # 更新bms中的SOC
 
                 # 记录到历史
                 self.battery_history[bat_name].append({
@@ -1408,6 +1437,7 @@ def load_ev_from_csv(csv_path):
             'capacity': df['battery_capacity'].tolist(),
             'initial_soc': [round(x, 2) for x in df['start_soc'].tolist()],
             'target_soc': [round(x, 2) for x in df['end_soc'].tolist()],
+            'type': df['curve_type'].tolist()
         }
 
         # 添加可选列
