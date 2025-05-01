@@ -571,23 +571,23 @@ class Env(gym.Env):
 
         def composite_reward(self, cd, rd, soc, dis, full=True, record_node=False):
             # the main reward function
-            p = self.powerloss_reward()
-            v, vio_nodes = self.voltage_reward(record_node)
-            t = self.ctrl_reward(cd, rd, soc, dis)
-            con = self.connection_reward()
-            com = self.completion_reward()  # 添加充电完成率奖励
-            e = self.energy_reward()
-            tf = self.tf_reward()
+            powerloss = self.powerloss_reward()
+            voltage, vio_nodes = self.voltage_reward(record_node)
+            ctrl = self.ctrl_reward(cd, rd, soc, dis)
+            connection = self.connection_reward()
+            completion = self.completion_reward()  # 添加充电完成率奖励
+            energy = self.energy_reward()
+            transformer = self.tf_reward()
 
-            total_reward = p + v + t + con + com + e + tf
+            total_reward = powerloss + voltage + ctrl + connection + completion + energy + transformer
 
             info = dict() if not record_node else {'violated_nodes': vio_nodes}
             if full:
-                info.update({'power_loss_ratio': -p / self.power_w,
-                             'PowerLoss_reward': p, 'Voltage_reward': v, 'Control_reward': t,
-                             'Connection_reward': con, 'Completion_reward': com, 'Energy_reward': e, 'Transformer_reward': tf})
+                info.update({'power_loss_ratio': -powerloss / self.power_w,
+                             'PowerLoss_reward': powerloss, 'Voltage_reward': voltage, 'Control_reward': ctrl,
+                             'Connection_reward': connection, 'Completion_reward': completion, 'Energy_reward': energy, 'Transformer_reward': transformer})
 
-            print(f"奖励各项的值：p: {p}, v: {v}, t: {t}, con: {con}, com: {com}, e: {e}, tf: {tf}.")
+            print(f"奖励各项的值：{powerloss=}, {voltage=}, {ctrl=}, {connection=}, {completion=}, {energy=}, {transformer=}.")
 
             return total_reward, info
 
