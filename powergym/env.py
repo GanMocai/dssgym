@@ -40,6 +40,8 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
+import math  # 单纯为向上取整引入，有点亏
+
 
 # %% 辅助函数
 def plotting(env, profile, episode_step, show_voltages=True) -> None:
@@ -246,7 +248,9 @@ class ActionSpace:
 
         if self.bat_act_num < float('inf'):
             # 离散
-            self.space = gym.spaces.MultiDiscrete([self.bat_act_num] * self.bat_num)
+            # self.space = gym.spaces.MultiDiscrete([self.bat_act_num] * self.bat_num)
+            self.space = gym.spaces.MultiDiscrete(
+                [self.bat_act_num] * sto_num + [(self.bat_act_num // 2) + 1] * (self.bat_num - sto_num))
         else:
             # 连续
             # self.space = gym.spaces.Box(low=-1, high=1, shape=(self.bat_num,),
