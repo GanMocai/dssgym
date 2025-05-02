@@ -12,6 +12,8 @@ https://claudeonline.top/chat/a08557ae-6984-4343-a7cf-4d948ce4c531
 from typing import List, Dict, Any, Optional, Union, Tuple
 
 
+from typing import List, Dict, Any, Optional, Union, Tuple
+
 class EVBMS:
     """
     电动汽车电池管理系统 (EVBMS)
@@ -27,7 +29,7 @@ class EVBMS:
     def __init__(self,
                  battery_capacity: float = 60.0,
                  max_battery_charge_power: float = 60.0,
-                 initial_soc: float = 20.0,
+                 initial_soc: float = 0.2,
                  charge_protocol: int = 0):
         """
         初始化EVBMS
@@ -35,13 +37,13 @@ class EVBMS:
         参数:
             battery_capacity: 电池容量(kWh)
             max_battery_charge_power: 电池支持的最大充电功率(kW)
-            initial_soc: 初始SOC百分比(0-100)
+            initial_soc: 初始SOC百分比(0-1)
             charge_protocol: 充电协议类型(0=多段恒流, 1=上升-平台-衰减, 2=恒功率)
         """
         # 基础参数
         self.battery_capacity = battery_capacity  # 电池容量(kWh)
         self.max_battery_charge_power = max_battery_charge_power  # 最大充电功率(kW)
-        self.current_soc = initial_soc  # 当前电量百分比
+        self.current_soc = initial_soc  # 当前电量百分比(0-1)
         self.charge_protocol = charge_protocol  # 充电协议
 
         self.charger_power = None
@@ -131,10 +133,10 @@ class EVBMS:
         # 假设在当前功率下，每小时充入的电量相当于电池容量的 currentPower/batteryCapacity 比例
         hours_fraction = elapsed_seconds / 3600
         energy_charged = self.current_charge_power * hours_fraction
-        soc_increase = (energy_charged / self.battery_capacity) * 100
+        soc_increase = (energy_charged / self.battery_capacity)  # SOC增加量(0-1)
 
         # 更新SOC (不考虑充电效率损失，实际应该有系数)
-        self.current_soc = min(100.0, self.current_soc + soc_increase)
+        self.current_soc = min(1.0, self.current_soc + soc_increase)
 
         # 根据新SOC重新计算充电功率
         new_power = self.calculate_charge_power(charger_power)
@@ -182,16 +184,16 @@ class EVBMS:
 
         # 根据充电协议和SOC调整充电功率
         if self.charge_protocol == self.PROTOCOL_MCC:  # 多段恒流充电
-            if self.current_soc < 30:
+            if self.current_soc < 0.3:
                 # 第一阶段: 最大功率充电
                 pass  # 保持当前功率不变
-            elif self.current_soc < 50:
+            elif self.current_soc < 0.5:
                 # 第二阶段: 80%功率
                 power = power * 0.8
-            elif self.current_soc < 70:
+            elif self.current_soc < 0.7:
                 # 第三阶段: 60%功率
                 power = power * 0.6
-            elif self.current_soc < 85:
+            elif self.current_soc < 0.85:
                 # 第四阶段: 40%功率
                 power = power * 0.4
             else:
@@ -199,31 +201,31 @@ class EVBMS:
                 power = power * 0.25
 
         elif self.charge_protocol == self.PROTOCOL_Decay:  # 上升-平台-衰减
-            if self.current_soc < 30:
+            if self.current_soc < 0.3:
                 # 上升阶段: 功率随SOC线性增加
-                power = power * (0.5 + self.current_soc / 60)  # 从50%额定功率开始线性增加
-            elif self.current_soc < 70:
+                power = power * (0.5 + self.current_soc / 0.6)  # 从50%额定功率开始线性增加
+            elif self.current_soc < 0.7:
                 # 平台阶段: 保持最大功率
                 pass  # 保持当前功率不变
             else:
                 # 衰减阶段: 功率随SOC增加而双曲线下降
                 k = 0.15  # 衰减系数
-                reduce_factor = 1 / (1 + k * (self.current_soc - 70))
+                reduce_factor = 1 / (1 + k * (self.current_soc - 0.7))
                 power = power * reduce_factor
 
         elif self.charge_protocol == self.PROTOCOL_CC_CV:  # 恒功率充电
             # 恒功率模式下功率不变，但在SOC很高时略微降低以保护电池
-            if self.current_soc > 90:
+            if self.current_soc > 0.9:
                 power = power * 0.9  # 轻微降低功率
 
         else:  # 未知充电协议，默认退化到多段恒流模式
-            if self.current_soc < 30:
+            if self.current_soc < 0.3:
                 pass  # 保持当前功率不变
-            elif self.current_soc < 50:
+            elif self.current_soc < 0.5:
                 power = power * 0.8
-            elif self.current_soc < 70:
+            elif self.current_soc < 0.7:
                 power = power * 0.6
-            elif self.current_soc < 85:
+            elif self.current_soc < 0.85:
                 power = power * 0.4
             else:
                 power = power * 0.25
@@ -291,14 +293,14 @@ class EVBMS:
         直接设置电池SOC值
 
         参数:
-            new_soc: 新的SOC值(0-100)
+            new_soc: 新的SOC值(0-1)
 
         返回:
             操作是否成功
         """
         # 验证SOC值是否在有效范围内
-        if not (0 <= new_soc <= 100):
-            print(f"错误: SOC值 {new_soc} 超出有效范围(0-100)")
+        if not (0 <= new_soc <= 1):
+            print(f"错误: SOC值 {new_soc} 超出有效范围(0-1)")
             return False
 
         # 更新SOC
@@ -311,9 +313,9 @@ class EVBMS:
             charger_power = self.current_charge_power
             new_power = self.calculate_charge_power(charger_power)
             self.set_charge_power(new_power)
-            print(f"SOC从 {old_soc:.2f}% 更新为 {new_soc:.2f}%, 充电功率调整为 {new_power:.2f} kW")
+            print(f"SOC从 {old_soc:.2f} 更新为 {new_soc:.2f}, 充电功率调整为 {new_power:.2f} kW")
         else:
-            print(f"SOC从 {old_soc:.2f}% 更新为 {new_soc:.2f}%")
+            print(f"SOC从 {old_soc:.2f} 更新为 {new_soc:.2f}")
 
         return True
 
@@ -324,7 +326,7 @@ if __name__ == "__main__":
     bms = EVBMS(
         battery_capacity=60.0,  # 电池容量60kWh
         max_battery_charge_power=120.0,  # 电池最大接受充电功率120kW
-        initial_soc=20.0,  # 初始SOC 20%
+        initial_soc=0.2,  # 初始SOC 0.2 (20%)
         charge_protocol=EVBMS.PROTOCOL_MCC  # 充电协议: 多段恒流 (0)
     )
 
@@ -334,11 +336,11 @@ if __name__ == "__main__":
 
     # 模拟充电10分钟
     print(f"\n充电10分钟后, 功率: {bms.update_charging_status(60.0, 600):.2f} kW")
-    print(f"当前SOC: {bms.current_soc:.2f}%")
+    print(f"当前SOC: {bms.current_soc:.2f}")
 
     # 模拟充电1小时
     print(f"\n充电1小时后, 功率: {bms.update_charging_status(60.0, 3600):.2f} kW")
-    print(f"当前SOC: {bms.current_soc:.2f}%")
+    print(f"当前SOC: {bms.current_soc:.2f}")
 
     # 模拟电池温度变化
     bms.set_battery_temperature(5.0)
@@ -348,65 +350,65 @@ if __name__ == "__main__":
     print("\n测试不同充电协议:")
 
     # 上升-平台-衰减
-    cc_cv_bms = EVBMS(
+    decay_bms = EVBMS(
         battery_capacity=60.0,
         max_battery_charge_power=120.0,
-        initial_soc=20.0,  # 从20%开始，观察上升阶段
+        initial_soc=0.2,  # 从0.2开始，观察上升阶段
         charge_protocol=EVBMS.PROTOCOL_Decay  # 上升-平台-衰减 (1)
     )
-    cc_cv_bms.start_charging(60.0)
-    print(f"上升-平台-衰减协议(20% SOC)功率: {cc_cv_bms.current_charge_power:.2f} kW")
+    decay_bms.start_charging(60.0)
+    print(f"上升-平台-衰减协议(0.2 SOC)功率: {decay_bms.current_charge_power:.2f} kW")
 
-    # 让SOC增加到50%，观察平台阶段
-    cc_cv_bms.set_soc(50.0)
-    print(f"上升-平台-衰减协议(50% SOC)功率: {cc_cv_bms.current_charge_power:.2f} kW")
+    # 让SOC增加到0.5，观察平台阶段
+    decay_bms.set_soc(0.5)
+    print(f"上升-平台-衰减协议(0.5 SOC)功率: {decay_bms.current_charge_power:.2f} kW")
 
-    # 让SOC增加到85%，观察衰减阶段
-    cc_cv_bms.set_soc(85.0)
-    print(f"上升-平台-衰减协议(85% SOC)功率: {cc_cv_bms.current_charge_power:.2f} kW")
+    # 让SOC增加到0.85，观察衰减阶段
+    decay_bms.set_soc(0.85)
+    print(f"上升-平台-衰减协议(0.85 SOC)功率: {decay_bms.current_charge_power:.2f} kW")
 
     # 恒功率充电
     constant_bms = EVBMS(
         battery_capacity=60.0,
         max_battery_charge_power=120.0,
-        initial_soc=50.0,
+        initial_soc=0.5,
         charge_protocol=EVBMS.PROTOCOL_CC_CV  # 恒功率充电 (2)
     )
     constant_bms.start_charging(60.0)
-    print(f"恒功率协议(50% SOC)功率: {constant_bms.current_charge_power:.2f} kW")
+    print(f"恒功率协议(0.5 SOC)功率: {constant_bms.current_charge_power:.2f} kW")
 
-    # 让SOC增加到95%，观察高SOC时的行为
-    constant_bms.set_soc(95.0)
-    print(f"恒功率协议(95% SOC)功率: {constant_bms.current_charge_power:.2f} kW")
+    # 让SOC增加到0.95，观察高SOC时的行为
+    constant_bms.set_soc(0.95)
+    print(f"恒功率协议(0.95 SOC)功率: {constant_bms.current_charge_power:.2f} kW")
 
-    # 继续使用原BMS充电直到SOC达到85%
+    # 继续使用原BMS充电直到SOC达到0.85
     print("\n继续多段恒流充电:")
-    while bms.current_soc < 85.0:
+    while bms.current_soc < 0.85:
         bms.update_charging_status(60.0, 600)  # 每次充电10分钟
 
-    print(f"充电至85% SOC, 当前功率: {bms.current_charge_power:.2f} kW")
+    print(f"充电至0.85 SOC, 当前功率: {bms.current_charge_power:.2f} kW")
 
     # 测试直接设置SOC
     print("\n测试直接设置SOC:")
     # 设置有效的SOC
-    result = bms.set_soc(90.0)
-    print(f"设置SOC为90%: {'成功' if result else '失败'}")
+    result = bms.set_soc(0.9)
+    print(f"设置SOC为0.9: {'成功' if result else '失败'}")
     print(f"当前功率: {bms.current_charge_power:.2f} kW")
 
     # 设置无效的SOC
-    result = bms.set_soc(120.0)
-    print(f"设置SOC为120%: {'成功' if result else '失败'}")
-    print(f"当前SOC: {bms.current_soc:.2f}%")
+    result = bms.set_soc(1.2)
+    print(f"设置SOC为1.2: {'成功' if result else '失败'}")
+    print(f"当前SOC: {bms.current_soc:.2f}")
 
     # 打印历史记录，查看时间段序号
     print("\n充电历史记录:")
     for record in bms.get_charging_history():
-        print(f"时间段: {record['segment']}, SOC: {record['soc']:.2f}%, 功率: {record['power']:.2f} kW")
+        print(f"时间段: {record['segment']}, SOC: {record['soc']:.2f}, 功率: {record['power']:.2f} kW")
 
     # 停止充电并查看充电会话
     session = bms.stop_charging()
     print(f"\n充电会话总结:")
     print(f"持续时间: {session['duration'] / 60:.2f} 分钟")
-    print(f"SOC变化: {session['start_soc']:.2f}% -> {session['end_soc']:.2f}%")
+    print(f"SOC变化: {session['start_soc']:.2f} -> {session['end_soc']:.2f}")
     print(f"时间段总数: {session['total_segments']}")
     print(f"功率历史记录数: {len(session['power_history'])}")
