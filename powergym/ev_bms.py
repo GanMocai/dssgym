@@ -176,9 +176,15 @@ class EVBMS:
         """
         if self.charger_power is None:
             self.charger_power = charger_power
+            print(f"初次设置{charger_power=}")
+        elif self.charger_power <= 10:  # BMS charger_power <= 10 可重设
+            print(f"{self.charger_power=} 改为 {charger_power}.")
+            self.charger_power = charger_power
+        # elif self.charger_power <= charger_power:
+        #     self.charger_power = charger_power
         else:
+            print(f'已有历史设置{self.charger_power=}，设置{charger_power=}失败.')
             charger_power = self.charger_power
-            print('已有历史设置charger_power，设置charger_power失败。')
         # 考虑充电桩功率限制与电池最大接受功率的较小值
         power = min(charger_power, self.max_battery_charge_power)
 
