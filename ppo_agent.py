@@ -94,7 +94,7 @@ def seeding_all(seed) -> None:
 def test_ppo_agent(model=None, model_path=None, output_dir=None, args=None, load_profile_idx=0,
                    worker_idx=None, use_plot=False, print_step=False, gen_calculate=False):
     """
-    测试PPO智能体并保存结果到指定目录 Todo: Generator的功率记录方式待更改；奖励函数及指标记录未修齐。
+    测试PPO智能体并保存结果到指定目录
 
     Args:
         model: 已训练好的PPO模型对象(可选)

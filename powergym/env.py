@@ -458,7 +458,7 @@ class Env(gym.Env):
             print(f"电池边界维度: {self.bat_num * 2}")
 
             # 添加充电站实时指标维度
-            low, high = low + [0.0, 0.0, 0.0, 0.0, 0.0], high + [1.0, float('inf'), float('inf'), 1.0, float('inf')]  # 连接率,充电功率,成功率,平均能量满足率
+            low, high = low + [0.0, 0.0, 0.0, 0.0, 0.0], high + [1.0, float('inf'), float('inf'), 1.0, float('inf')]  # 连接率,充电功率,总连接数,成功率,平均能量满足率
             print(f"EV station metrics dimension: 5")
 
             if observe_load:
