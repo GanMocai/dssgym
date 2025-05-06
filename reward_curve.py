@@ -14,23 +14,49 @@ import argparse
 import pandas as pd
 import matplotlib.pyplot as plt
 
+font = {'family': 'SimSun',  # 宋体
+        'weight': 'bold',
+        'size': '16'}
+plt.rc('font', **font)  # 步骤一（设置字体的更多属性）
+plt.rc('axes', unicode_minus=False)  # 步骤二（解决坐标轴负数的负号显示问题）
 
 def plot_training_reward(csv_path):
     df = pd.read_csv(csv_path)
-    episodes = df["step"]  # 命名成step了，尴尬，太赶了
-    rewards = df["reward"]
-    # 使用窗口大小10计算移动平均奖励
-    window = 10
-    rewards_ma = rewards.rolling(window=window, min_periods=1).mean()
+    # episodes = df["step"]  # 命名成step了，尴尬，太赶了
+    # rewards = df["reward"]
+
+    # 确保数据类型正确（将step和reward列转换为数值类型）
+    df["step"] = pd.to_numeric(df["step"], errors="coerce")
+    df["reward"] = pd.to_numeric(df["reward"], errors="coerce")
+
+    # 使用窗口大小100计算移动平均奖励，使曲线更平滑
+    window = 100
+    # 在DataFrame上直接计算移动平均
+    df['rewards_ma'] = df['reward'].rolling(window=window, min_periods=1).mean()
+
+    episodes = df["step"].tolist()  # 需要时再转换为列表
+    rewards = df["reward"].tolist()
+    rewards_ma = df["rewards_ma"].tolist()
+
+    # print(episodes, rewards, rewards_ma)
 
     plt.figure(figsize=(10, 6))
-    plt.plot(episodes, rewards, label="Episode Reward")
-    plt.plot(episodes, rewards_ma, label="Moving Average Reward")
-    plt.xlabel("Episode")
-    plt.ylabel("Reward")
-    plt.title("Training Reward Curve")
+    plt.plot(episodes, rewards, 'b-', alpha=0.3, label="单回合奖励")
+    plt.plot(episodes, rewards_ma, 'r-', linewidth=2, label="移动平均奖励")
+    # 自动调整Y轴范围，使图像更清晰
+    # 设置合理的Y轴范围，排除极端值的影响——1-3需要
+    # reward_q1 = pd.Series(rewards).quantile(0.00005)  # 5%分位数
+    # reward_q3 = pd.Series(rewards).quantile(1)  # 95%分位数
+    # y_min = max(reward_q1 * 1.5, min(rewards_ma) * 1.2)  # 确保能显示移动平均线
+    # y_max = min(reward_q3 * 1.5, max(rewards_ma) * 1.2)  # 确保能显示移动平均线
+    # plt.ylim(y_min, y_max)
+
+    plt.xlabel("回合")
+    plt.ylabel("奖励")
+    plt.title("训练过程奖励曲线")
     plt.legend()
     plt.grid(True)
+    plt.savefig('training_reward_curve.png', dpi=300)  # 保存图像
     plt.show()
 
 
@@ -45,7 +71,7 @@ def plot_test_reward(csv_path):
     plt.title("Test Reward Curve")
     plt.legend()
     plt.grid(True)
-    plt.show()
+    # plt.show()
 
 
 def main():
@@ -63,5 +89,21 @@ def main():
 
 if __name__ == "__main__":
     # main()
-    path = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250501_021615_13Bus_cbat_1000000_01\rewards_in_training.csv'
-    plot_training_reward(path)
+    path = ['0']
+    path_1 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250501_021615_13Bus_cbat_1000000_01\rewards_in_training.csv'
+    path_2 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250502_005245_13Bus_cbat_s2_1000000_02\rewards_in_training.csv'
+    path_3 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250502_125646_13Bus_1000000_03\rewards_in_training.csv'
+    path_4 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250503_091058_13Bus_cbat_1000000_04\rewards_in_training.csv'
+    path_5 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250503_124337_13Bus_cbat_s2_1000000_05\rewards_in_training.csv'
+    path_6 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250503_165005_13Bus_1000000_06\rewards_in_training.csv'
+    path_7 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250504_012306_13Bus_cbat_1000000_07\rewards_in_training.csv'
+    path_8 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250504_055308_13Bus_cbat_1000000_08\rewards_in_training.csv'
+    path.append(path_1)
+    path.append(path_2)
+    path.append(path_3)
+    path.append(path_4)
+    path.append(path_5)
+    path.append(path_6)
+    path.append(path_7)
+    path.append(path_8)
+    plot_training_reward(path[8])
