@@ -179,21 +179,21 @@ class RulesAgent:
                 if remain_kVA < -150:  # 变压器超安全容量多
                     # 强制储能放电以减轻负载
                     if i <= self.sto_num:
-                        actions.append(-1.0)
+                        actions.append(1.0)
                     else:
-                        actions.append(0.6)
+                        actions.append(-0.4)
                 elif remain_kVA < 0:  # 轻微
                     if i <= self.sto_num:
                     # 放电强度与过载程度成正比
                         discharge_level = min(remain_kVA / -150, 1.0)
-                        actions.append(-discharge_level)
+                        actions.append(discharge_level)
                     else:
-                        actions.append(0.8)
+                        actions.append(-0.8)
                 else:
                     if i <= self.sto_num:
-                        actions.append(0.2)
+                        actions.append(-0.2)
                     else:
-                        actions.append(1.0)
+                        actions.append(-1.0)
             else:
                 # 离散动作空间 [0, bat_act_num-1]
                 mid_point = self.bat_act_num // 2  # 中间点表示不充不放
@@ -203,25 +203,25 @@ class RulesAgent:
                     if i < self.sto_num:
                         actions.append(0)  # 最大放电
                     else:
-                        # 对应连续空间的0.6，大约是轻微充电
-                        actions.append(int(mid_point + (self.bat_act_num * 0.2)))
+                        # 对应连续空间的-0.4，大约是轻微充电
+                        actions.append(int(mid_point * (1 - 0.4)))
                 elif remain_kVA < 0:  # 轻微
                     if i < self.sto_num:
                         # 放电强度与过载程度成正比
                         discharge_ratio = min(remain_kVA / -150, 1.0)
-                        # 将连续空间的-discharge_level映射到离散空间
-                        discharge_level = int(mid_point * (1 - discharge_ratio))
+                        # 将连续空间的discharge_level映射到离散空间
+                        discharge_level = int(mid_point * (1 + discharge_ratio))
                         actions.append(max(discharge_level, 0))
                     else:
                         # 对应连续空间的0.8，更强的充电
-                        actions.append(int(mid_point + (self.bat_act_num * 0.3)))
+                        actions.append(int(mid_point * (1 - 0.8)))
                 else:
                     if i < self.sto_num:
-                        # 对应连续空间的0.2，轻微放电
-                        actions.append(int(mid_point - (self.bat_act_num * 0.1)))
+                        # 对应连续空间的-0.2，轻微充电
+                        actions.append(int(mid_point * (1 - 0.2)))
                     else:
                         # 对应连续空间的1.0，最大充电
-                        actions.append(self.bat_act_num - 1)
+                        actions.append(0)
 
         return np.array(actions)
 
@@ -258,6 +258,8 @@ def test_rules_agent(output_dir=None, args=None, load_profile_idx=0,
     save_path = os.path.join(base_dir, f"test_results_rules_{timestamp}_{args.env_name}")
     if not os.path.exists(save_path):
         os.makedirs(save_path)
+
+
 
     # 创建绘图子目录
     plot_dir = os.path.join(save_path, "plots")
@@ -604,7 +606,7 @@ def run_rules_agent(args):
     # 检查是否要运行测试模式
     if args.test_only:
         # 运行测试并返回
-        test_rules_agent(output_dir="result", args=args,
+        test_rules_agent(args=args,
                          load_profile_idx=args.load_profile_idx,
                          use_plot=args.use_plot)
         return
@@ -703,11 +705,27 @@ if __name__ == '__main__':
     # 添加规则智能体特有的参数
     parser = argparse.ArgumentParser()
     parser.add_argument('--num_episodes', type=int, default=50, help='评估的回合数')
+    parser.add_argument('--test_only', action='store_true', help='只运行测试')
+    parser.add_argument('--test_after_run', action='store_true', help='训练后运行测试')
+    parser.add_argument('--load_profile_idx', type=int, default=0, help='测试时使用的负载配置索引')
+    parser.add_argument('--use_plot', action='store_true', help='是否生成图表')
 
     # 合并args
     rules_args, _ = parser.parse_known_args()
     for key, value in vars(rules_args).items():
         setattr(args, key, value)
+
+    # 确保导入需要的库
+    if args.test_only or args.test_after_run or args.use_plot:
+        import datetime
+        import glob
+
+        try:
+            import matplotlib.pyplot as plt
+            import imageio
+        except ImportError:
+            print("警告: 缺少绘图或生成动画所需的库。请安装 matplotlib 和 imageio。")
+            args.use_plot = False
 
     start_time = time.time()
     run_rules_agent(args)
