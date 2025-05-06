@@ -1899,11 +1899,15 @@ class BatteryStationManager:
         """更新电池功率调度记录"""
         # total_charging_power = 0
         for idx, name in self.connected_batteries.items():
-            if self.arrival[idx] <= self.current_step < self.departure[idx]:
-                bat_status = self.controller.get_battery_status(name)
-                if bat_status:
-                    # 记录EV视角的功率，正值表示充电
-                    self.schedule[idx, self.current_step] = bat_status['charging_power']
+            bat_status = self.controller.get_battery_status(name)
+            if bat_status:
+                # 记录EV视角的功率，正值表示充电
+                self.schedule[idx, self.current_step] = bat_status['charging_power']
+            # if self.arrival[idx] <= self.current_step < self.departure[idx]:
+            #     bat_status = self.controller.get_battery_status(name)
+            #     if bat_status:
+            #         # 记录EV视角的功率，正值表示充电
+            #         self.schedule[idx, self.current_step] = bat_status['charging_power']
                 # total_charging_power += bat_status['charging_power']
         # 更新当前充电功率
         # self.stats['current_charging_power'] = total_charging_power
