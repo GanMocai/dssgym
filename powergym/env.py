@@ -559,7 +559,7 @@ class Env(gym.Env):
                 [bat.actual_power() * np.tan(np.arccos(bat.pf)) for name, bat in self.env.circuit.storage_batteries.items() if
                  name in self.env.bat_names[:self.env.sto_num]])
             PV_kW = sum(load.feature[1] for key, load in self.env.circuit.loads.items() if "PV" in key and load.bus == self.env.ev_station_bus)  # feature0 kV,1 kW, 2 kVar
-            PV_kVar = sum(load.feature[2] for key, load in self.env.circuit.loads.items() if "PV" in key and load.bus == self.env.ev_station_bu)
+            PV_kVar = sum(load.feature[2] for key, load in self.env.circuit.loads.items() if "PV" in key and load.bus == self.env.ev_station_bus)
             total_kW = ev_kW + storage_kW + PV_kW
             total_kVar = ev_kVar + storage_kVar + PV_kVar
             total_kVA = np.sqrt(total_kW ** 2 + total_kVar ** 2)
