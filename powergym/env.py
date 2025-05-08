@@ -668,6 +668,7 @@ class Env(gym.Env):
 
         # 更新功率调度方案记录
         self.ev_station.update_schedule()
+        self.ev_station.update_storage_statuses()
 
         # 更新时间步
         self.t += 1

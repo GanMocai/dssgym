@@ -1114,7 +1114,7 @@ class Battery(Node):
 
 class BatteryController:
     """
-    EV电池的连接/断开和功率控制类(站的充电控制而非电池的充电控制)，也控制储能电池。
+    EV电池的连接/断开和功率控制类(站点层级的充电控制而非单个电池的充电控制)，也控制储能电池。
     """
 
     def __init__(self, circuit):
@@ -1477,6 +1477,7 @@ class BatteryStationManager:
 
     Attributes:
         circuit (Circuits): 电力系统仿真对象
+        controller (BatteryController): 电池控制器实例
         battery_count (int): 电池总数量
         initial_data (dict): 保存初始输入数据的字典
         arrival (list): 每个电池的到达时间步
@@ -1494,7 +1495,7 @@ class BatteryStationManager:
         total_steps (int): 总时间步数
         current_step (int): 当前时间步
         schedule (np.ndarray): 电池功率排程矩阵，形状为(battery_count, total_steps)
-        controller (BatteryController): 电池控制器实例
+        storage
         sorted_indices (np.ndarray): 按到达时间排序的电池索引
         stats (dict): 性能统计数据，可能还需要包括等待时间、拒绝数量、实时充电满足率等，已经包括实时充电满足率
     """
@@ -1574,7 +1575,9 @@ class BatteryStationManager:
         # 时间和调度
         self.total_steps = total_steps
         self.current_step = 0
-        self.schedule = np.zeros((self.battery_count, self.total_steps))  # 电池功率调度
+        self.schedule = np.zeros((self.battery_count, self.total_steps))  # EV电池功率矩阵
+        self.storage_schedule = np.zeros((len(self.circuit.storage_batteries), self.total_steps))
+        self.storage_energy = np.zeros((len(self.circuit.storage_batteries), self.total_steps))
 
         # 确保电池控制器存在  Fixme: 实际最初是想需要将这部分和控制器相互嵌入
         if circuit.ev_controller is not None:
@@ -1891,12 +1894,12 @@ class BatteryStationManager:
             total_charging_power = 0
             for idx, name in self.connected_batteries.items():
                 bat_status = self.controller.get_battery_status(name)
-                if bat_status:  # 移除符号判断，搞得之前都没成功统计过，容量约束白瞎了
+                if bat_status:  # 移除符号判断，符号判定导致之前未成功统计，容量约束不生效
                     total_charging_power += abs(bat_status['actual_power'])
             self.stats['current_charging_power'] = total_charging_power
 
     def update_schedule(self):
-        """更新电池功率调度记录"""
+        """更新EV电池功率记录"""
         # total_charging_power = 0
         for idx, name in self.connected_batteries.items():
             bat_status = self.controller.get_battery_status(name)
@@ -1911,6 +1914,16 @@ class BatteryStationManager:
                 # total_charging_power += bat_status['charging_power']
         # 更新当前充电功率
         # self.stats['current_charging_power'] = total_charging_power
+
+    def update_storage_statuses(self):
+        """更新储能电池的状态信息"""
+        for idx, name in self.circuit.storage_batteries.items():
+            # 获取储能电池的状态
+            sto_status = self.controller.get_battery_status(name)
+            if sto_status:
+                # 记录储能的放电功率和能量
+                self.storage_schedule[idx, self.current_step] = -sto_status['charging_power']
+                self.storage_energy[idx, self.current_step] = sto_status['stored_energy']
 
     def export_schedule(self, output_path=None):
         """
@@ -1931,6 +1944,36 @@ class BatteryStationManager:
             return True
         except Exception as e:
             print(f"导出调度记录失败: {e}")
+            return False
+
+    def export_storage(self, output_path=None):
+        """
+        导出储能放电功率和能量记录到 CSV 文件
+
+        Args:
+            output_path (str): 输出文件名，缺省时使用 "storage_schedule.csv"
+
+        Returns:
+            bool: 是否成功导出
+        """
+        try:
+            col_names = [f"step_{i}" for i in range(self.total_steps)]
+            power_df = pd.DataFrame(self.storage_schedule, index=self.circuit.storage_batteries.keys(),
+                                    columns=col_names)
+            energy_df = pd.DataFrame(self.storage_energy, index=self.circuit.storage_batteries.keys(),
+                                     columns=col_names)
+
+            power_output_file = output_path if output_path else "storage_schedule.csv"
+            energy_output_file = output_path.replace("_schedule.csv", "_energy.csv") if output_path else "storage_energy.csv"
+
+            power_df.to_csv(power_output_file, index=True)
+            energy_df.to_csv(energy_output_file, index=True)
+
+            print(f"储能放电功率记录已导出到 {power_output_file}")
+            print(f"储能能量记录已导出到 {energy_output_file}")
+            return True
+        except Exception as e:
+            print(f"导出储能记录失败: {e}")
             return False
 
     def update_before_solve(self):

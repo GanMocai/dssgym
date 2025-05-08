@@ -394,6 +394,7 @@ def test_ppo_agent(model=None, model_path=None, output_dir=None, args=None, load
     # 导出充电站调度表
     try:
         env.ev_station.export_schedule(output_path=os.path.join(save_path, "schedule.csv"))
+        env.ev_station.export_storage(output_path=os.path.join(save_path, "storage_schedule.csv"))
     except Exception as e:
         print(f"导出充电站调度表失败: {e}。")
 
