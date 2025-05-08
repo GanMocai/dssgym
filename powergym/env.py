@@ -402,6 +402,7 @@ class Env(gym.Env):
         self.ev_demand_path = info['ev_demand']  # 用于保存到训练信息
         self.ev_station_bus = info['bus_name']   # 用于保存到训练信息
         self.ev_charger_num = info['num_chargers']  # 用于保存到训练信息
+        self.ev_charger_kW = info['charger_kW'] # 用与保存到训练信息
         self.ev = load_ev_from_csv(info['ev_demand'])  # EV信息
         self.ev_controller = BatteryController(self.circuit)
         self.circuit.ev_controller = self.ev_controller

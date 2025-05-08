@@ -39,8 +39,9 @@ import pandas as pd
 from pathlib import Path
 from collections import deque
 
-from powergym.powergym.ev_bms import EVBMS
-
+# from powergym.powergym.ev_bms import EVBMS
+# 替换为更新的 ev_bms
+from powergym.powergym.ev_bms_v01 import EVBMS
 
 class Circuits:
     """Circuits 类：电力系统的核心管理类
@@ -142,6 +143,7 @@ class Circuits:
                 for battery_idx, connection_id in self.ev_station.battery_connection_points.items():
                     if connection_id == j and battery_idx in self.ev_station.connected_batteries:
                         ev_idx = battery_idx
+                        charger_id = connection_id
                         break
 
                 if ev_idx is not None:  # 如果有EV连接到此连接点
@@ -150,7 +152,7 @@ class Circuits:
 
                     if full_name in self.batteries:
                         batt = self.batteries[full_name]
-                        kw = batt.state_projection(nkws_or_states[idx_in_nkws_or_states])  # 提供的kW容量
+                        kw = batt.state_projection(nkws_or_states[idx_in_nkws_or_states], self.ev_station.ev_charger_kW[charger_id])  # 提供的kW容量
                         if hasattr(self.ev_controller, 'bms_instances') and full_name in self.ev_controller.bms_instances:
                             bms = self.ev_controller.bms_instances[full_name]
                             kw = -bms.calculate_charge_power(-kw)  # 时刻注意符号变换
@@ -1005,7 +1007,7 @@ class Battery(Node):
         Status: {self.state!r}, kWh: {self.kwh!r}, SOC: {self.soc!r}, \
         Actual kW: {-self.actual_power()!r}'
 
-    def state_projection(self, nkw_or_state):
+    def state_projection(self, nkw_or_state, base_kW=None):
         """
         Project to the valid state
 
@@ -1015,9 +1017,14 @@ class Battery(Node):
         Returns:
             the valid discharge kw
         """
-        # Todo: 目前是按照Battery初始化时的额定功率作为基准值，后续将映射处理改为统一基准值，但应该会影响训练收敛，先不动。
+        # Todo: 之前是按照Battery初始化时的额定功率作为基准值，后续将映射处理改为统一基准值，但应该会影响训练收敛，先不动。
+        # Improve: 已改为可另外设置基值，如设为充电桩总容量kW，默认仍为电池最大支持功率（连续和差分都是）
+        if base_kW is None:
+            kW_base = self.max_kw
+        else:
+            kW_base = base_kW
         if self.bat_act_num == np.inf:
-            kw = max(-1.0, min(1.0, nkw_or_state)) * self.max_kw
+            kw = max(-1.0, min(1.0, nkw_or_state)) * kW_base
             if kw > 0:
                 kw = min(self.kwh / self.duration, kw)
             else:
@@ -1038,7 +1045,13 @@ class Battery(Node):
                     state = int(state + np.ceil((allowed_kw - self.avail_kw[state]) / \
                                                 (self.avail_kw[1] - self.avail_kw[0]) - 1e-8))
             self.state = state
-            return self.avail_kw[state]
+            if base_kW is None:
+                return self.avail_kw[state]
+            else:
+                diff = kW_base / self.bat_act_num
+                mode_num = self.bat_act_num // 2
+                avail_kw = [n * diff for n in range(-mode_num, mode_num + 1)]
+                return avail_kw[state]
 
     def step_before_solve(self, nkw_or_state):
         """
