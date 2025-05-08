@@ -294,24 +294,28 @@ _STATION_INFO = {
     '13Bus': {
         'bus_name': '680',  # 充电站连接的母线名称
         'num_chargers': 10,  # 充电桩数量
+        'charger_kW': [120]*10, # 各充电桩容量
         'transformer_kVA': 800, # 设定专变的容量
         # 'ev_price': '13Bus_ev_price.csv',  # 电价文件
     },
     '34Bus': {
         'bus_name': '',  # 充电站连接的母线名称
         'num_chargers': 10,  # 充电桩数量
+        'charger_kW': [120]*10, # 各充电桩容量
         'transformer_kVA': 800, # 设定专变的容量
         # 'ev_price': '13Bus_ev_price.csv',  # 电价文件
     },
     '123Bus': {
         'bus_name': '',  # 充电站连接的母线名称
         'num_chargers': 10,  # 充电桩数量
+        'charger_kW': [120]*10, # 各充电桩容量
         'transformer_kVA': 800,  # 设定专变的容量
         # 'ev_price': '13Bus_ev_price.csv',  # 电价文件
     },
     '8500-Node': {
         'bus_name': '',  # 充电站连接的母线名称
         'num_chargers': 10,  # 充电桩数量
+        'charger_kW': [120]*10, # 各充电桩容量
         'transformer_kVA': 800,  # 设定专变的容量
         # 'ev_price': '13Bus_ev_price.csv',  # 电价文件
     }
