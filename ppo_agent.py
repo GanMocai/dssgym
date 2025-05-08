@@ -545,6 +545,7 @@ def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, pri
         f.write(f"ev_demand_path: {env.ev_demand_path}\n")
         f.write(f"ev_station_bus: {env.ev_station_bus}\n")
         f.write(f"ev_charger_num: {env.ev_charger_num}\n")
+        f.write(f"ev_charger_kW: {env.ev_charger_kW}\n")
 
     # 测试训练得到的模型
     test_ppo_agent(model_path=model_path,args=args,load_profile_idx=load_profile_idx,use_plot=use_plot,print_step=print_step)
