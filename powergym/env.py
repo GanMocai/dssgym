@@ -662,6 +662,12 @@ class Env(gym.Env):
             soc_errs, dis_errs, bat_statuses = [], [], dict()
 
         # print(f'当前在执行step函数，电池状态键值对的数量为{len(bat_statuses)}.')  # 通过输出检查电池接入情况
+        # 更新统计数据，以免被离开检查提前释放，没记录上。
+        # 更新总功率
+        self.ev_station.update_statistics(update_type="summary")
+
+        # 更新功率调度方案记录
+        self.ev_station.update_schedule()
 
         # 更新时间步
         self.t += 1
@@ -670,12 +676,6 @@ class Env(gym.Env):
 
         # 队列处理 对于每个时段，离开先于到达。
         self.ev_station.check_departures()  # 检查离开
-
-        # 更新总功率
-        self.ev_station.update_statistics(update_type="summary")
-
-        # 更新功率调度方案记录
-        self.ev_station.update_schedule()
 
         # 更新 obs
         bus_voltages = dict()
