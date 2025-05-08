@@ -153,7 +153,7 @@ class Circuits:
 
                     if full_name in self.batteries:
                         batt = self.batteries[full_name]
-                        kw = batt.state_projection(nkws_or_states[idx_in_nkws_or_states], self.ev_station.ev_charger_kW[charger_id])  # 提供的kW容量
+                        kw = batt.state_projection(nkws_or_states[idx_in_nkws_or_states], self.ev_station.charger_kW[charger_id])  # 提供的kW容量
                         if hasattr(self.ev_controller, 'bms_instances') and full_name in self.ev_controller.bms_instances:
                             bms = self.ev_controller.bms_instances[full_name]
                             kw = -bms.calculate_charge_power(-kw)  # 时刻注意符号变换
@@ -1514,7 +1514,7 @@ class BatteryStationManager:
         stats (dict): 性能统计数据，可能还需要包括等待时间、拒绝数量、实时充电满足率等，已经包括实时充电满足率
     """
 
-    def __init__(self, circuit, bus, num_connection_points, arrival, departure,
+    def __init__(self, circuit, bus, num_connection_points, charger_kW, arrival, departure,
                  max_power, initial_soc, target_soc, capacity,
                  battery_names=None, total_steps=96, EV_PF=-0.98):
         """
@@ -1522,6 +1522,7 @@ class BatteryStationManager:
             circuit: Circuits对象，电力系统实例
             bus: 接入点母线名称  （本来想改，但是pycharm重构对于这种大众名比较麻烦）
             num_connection_points: 电网可用接入点数量
+            charger_kW: 接入点提供功率的列表
             arrival: 到达时间步列表
             departure: 离开时间步列表
             max_power: 最大功率列表(kW)
@@ -1534,6 +1535,7 @@ class BatteryStationManager:
         # 保存电力系统仿真对象引用
         self.circuit = circuit
         self.EV_PF = EV_PF
+        self.charger_kW = charger_kW
 
         # 验证输入参数
         self.battery_count = len(arrival)
@@ -1931,7 +1933,7 @@ class BatteryStationManager:
 
     def update_storage_statuses(self):
         """更新储能电池的状态信息"""
-        for idx, name in self.circuit.storage_batteries.items():
+        for idx, name in enumerate(self.circuit.storage_batteries.keys()):
             # 获取储能电池的状态
             sto_status = self.controller.get_battery_status(name)
             if sto_status:

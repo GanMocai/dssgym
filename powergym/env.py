@@ -406,7 +406,7 @@ class Env(gym.Env):
         self.ev = load_ev_from_csv(info['ev_demand'])  # EV信息
         self.ev_controller = BatteryController(self.circuit)
         self.circuit.ev_controller = self.ev_controller
-        self.ev_station = BatteryStationManager(self.circuit, self.station_bus, self.con_num,
+        self.ev_station = BatteryStationManager(self.circuit, self.station_bus, self.con_num, self.ev_charger_kW,
                                                 self.ev['arrival'],self.ev['departure'],
                                                 self.ev['max_power'] ,self.ev['initial_soc'], self.ev['target_soc'],
                                                 self.ev['capacity'])
