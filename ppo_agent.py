@@ -30,6 +30,7 @@ import multiprocessing as mp
 import datetime
 import time
 
+from powergym.end_projection import CustomActionWrapper
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Argument Parser')
@@ -499,7 +500,10 @@ def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, pri
 
     # 获取环境
     env = make_env(args.env_name, worker_idx=worker_idx)
-    env.seed(args.seed + 0 if worker_idx is None else worker_idx)
+
+    env.seed(args.seed + 0 if worker_idx is None else worker_idx)  # 不同进程使用不同的种子
+
+    env = CustomActionWrapper(env, sto_num=env.sto_num)
 
     if print_step:
         print('This system has {} capacitors, {} regulators and {} batteries'.format(env.cap_num, env.reg_num,
