@@ -57,7 +57,10 @@ def parse_arguments():
                         help="mini-batch size for optimization")
     # 添加测试模式
     parser.add_argument('--test_only', type=lambda x: str(x).lower() == 'true', default=False,
-                        help="仅测试已保存的模型而不训练")
+                        help="是否仅测试已训练的模型")
+    # 添加命令行参数以便调整是否打印每步信息
+    parser.add_argument('--print_step', type=lambda x: str(x).lower() == 'true', default=False,
+                        help="测试时是否打印每步信息")
     arguments = parser.parse_args()
     return arguments
 
@@ -113,7 +116,10 @@ def test_ppo_agent(model=None, model_path=None, output_dir=None, args=None, load
         save_path: 结果保存路径
     """
     if model is None and model_path is None:
-        raise ValueError("必须提供model或model_path其中之一")
+        raise ValueError("必须提供model或model_path其中之一！")
+
+    if print_step is None:
+        print_step = args.print_step
 
     # 确定保存路径
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -450,7 +456,7 @@ def test_ppo_agent(model=None, model_path=None, output_dir=None, args=None, load
     return episode_reward, save_path
 
 
-def test_saved_model(model_path, args, load_profile_idx=0, use_plot=True, print_step=True):
+def test_saved_model(model_path, args, load_profile_idx=0, use_plot=True, print_step:bool=None):
     """
     测试已保存的模型
 
@@ -462,6 +468,8 @@ def test_saved_model(model_path, args, load_profile_idx=0, use_plot=True, print_
         print_step: 是否打印每步详情
     """
     print(f"使用保存的模型 {model_path} 进行测试...")
+    if print_step is None:
+        print_step = args.print_step
     return test_ppo_agent(
         model_path=model_path,
         args=args,
@@ -471,7 +479,7 @@ def test_saved_model(model_path, args, load_profile_idx=0, use_plot=True, print_
     )
 
 
-def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, print_step=False):
+def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, print_step:bool=None):
     """
     训练PPO智能体并进行测试
     Args:
