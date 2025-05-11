@@ -396,7 +396,7 @@ class Env(gym.Env):
         self.con_num = info['num_chargers']  # 获取充电桩数量
         self.bat_num = self.con_num + len(self.bat_names)  # 从参数中获取EV连接点数量，再加上电路中已设置的数量
         self.station_bus = info['bus_name']  # 充电站连接的母线名称
-        print(f"环境初始化中，充电站链接母线为 {self.station_bus}")
+        print(f"环境初始化中，充电站母线为 {self.station_bus}.")
         # 创建充电站
         self.station_transformer_capacity = info['transformer_kVA']  # 专变容量
         self.ev_demand_path = info['ev_demand']  # 用于保存到训练信息

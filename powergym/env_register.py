@@ -343,25 +343,25 @@ for env in _ENV_INFO.keys():
     _ENV_INFO[env].update(_SYS_INFO[sys])  # 将对应_SYS_INFO中的所有配置项添加到环境的配置字典中
     # 将所有的max_episode_steps从24改为96
     _ENV_INFO[env]['max_episode_steps'] = 96
-    # 场景不涉及regulator操作，将所有环境的reg_w置零，禁用regulator奖励权重
+    # 场景不涉及regulator操作，将所有环境的reg_w置零，禁用调压奖励权重
     _ENV_INFO[env]['reg_w'] = 0.0
     # 汽车充电站较少配置电容，将所有环境的cap_w置零，禁用电容奖励权重
     _ENV_INFO[env]['cap_w'] = 0.0
-    # 暂时不考虑由SOC构成的奖励项
-    _ENV_INFO[env]['soc_w'] = 0.0
+    # 储能SOC平衡的惩罚项
+    _ENV_INFO[env]['soc_w'] = 5.0
     # 暂时不考虑对放电的限制
     _ENV_INFO[env]['dis_w'] = 0.0
     # 在info中添加充电站信息，包括母线、连接点数量
     _ENV_INFO[env].update(_STATION_INFO[sys])
-    # 在info中ev充电需求队列文件路径
+    # 在info中添加 EV 充电需求队列文件路径
     _ENV_INFO[env].update(_EV_INFO[sys])
     # 在info中添加充电站相关充电完成率的权重
-    _ENV_INFO[env]['completion_w'] = 10  # 常用值10
-    _ENV_INFO[env]['connection_w'] =2 * 10/250  # 按EV总数目归一化，同时又突出重要性
-    _ENV_INFO[env]['energy_w'] = 10
+    _ENV_INFO[env]['completion_w'] = 10.0/10.0 # 二轮常用值 10.0
+    _ENV_INFO[env]['connection_w'] = 2 * 10.0/10.0 / 250  # 按EV总数目归一化，同时又突出重要性
+    _ENV_INFO[env]['energy_w'] = 10.0/10.0  # 二轮常用值 10.0
     # 显式设置电压越限惩罚权重
-    _ENV_INFO[env]['voltage_w'] = 10
-    _ENV_INFO[env]['tf_capacity_w'] = 10
+    _ENV_INFO[env]['voltage_w'] = 10.0
+    _ENV_INFO[env]['tf_capacity_w'] = 10.0 / 200 # 按达到安全限值前计算 Note: 每次调整都需要更改统计中的超容量统计方式
 
 
 # %% 函数
