@@ -904,7 +904,7 @@ class Env(gym.Env):
         terminated = (self.t == self.horizon)  # Episode is done due to termination condition
         truncated = False  # Not truncated due to time limit, etc.
 
-        reward, info = self.reward_func.composite_reward(capdiff, regdiff, soc_errs[:env.sto_num], dis_errs)
+        reward, info = self.reward_func.composite_reward(capdiff, regdiff, soc_errs[self.sto_num], dis_errs)
         # avoid dividing by zero
         # noinspection PyTypeChecker
         info.update({'av_cap_err': sum(capdiff) / (self.cap_num + 1e-10),
