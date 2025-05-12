@@ -254,6 +254,9 @@ class EVBMS:
         返回:
             计算后的充电功率(kW)
         """
+        if enable_power_demand is not None:
+            self.enable_power_demand = enable_power_demand
+
         # 判断是否启用功率需求计算
         if not self.enable_power_demand:
             # 不启用功率需求计算，直接返回充电桩功率
@@ -270,9 +273,6 @@ class EVBMS:
         else:
             print(f'已有历史设置{self.charger_power=}，设置{charger_power=}失败。')
             charger_power = self.charger_power
-
-        if enable_power_demand is not None:
-            self.enable_power_demand = enable_power_demand
 
         # 启用功率需求计算
         # 计算EV的功率需求值
