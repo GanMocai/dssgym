@@ -147,7 +147,7 @@ def test_ppo_agent(model=None, model_path=None, output_dir=None, args=None, load
     # 获取环境
     env = make_env(args.env_name, worker_idx=worker_idx)
     env.seed(args.seed + 0 if worker_idx is None else worker_idx)
-    env = CustomActionWrapper(env, sto_num=env.sto_num)
+    env = CustomActionWrapper(env)
 
     # 加载模型(如果未提供model)
     if model is None and model_path is not None:
@@ -512,7 +512,7 @@ def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, pri
 
     env.seed(args.seed + 0 if worker_idx is None else worker_idx)  # 不同进程使用不同的种子
 
-    env = CustomActionWrapper(env, sto_num=env.sto_num)
+    env = CustomActionWrapper(env)
 
     if print_step:
         print('This system has {} capacitors, {} regulators and {} batteries'.format(env.cap_num, env.reg_num,
