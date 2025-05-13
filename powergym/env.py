@@ -566,10 +566,10 @@ class Env(gym.Env):
             total_kVA = np.sqrt(total_kW ** 2 + total_kVar ** 2)
             remain_kVA = 0.75 * tf_kVA - total_kVA
             if total_kVA > tf_kVA:
-                print("超出上限")
+                print("超出专变容量上限")
                 return 1000 * self.tf_capacity_w * remain_kVA
             elif total_kVA > 0.75 * tf_kVA:
-                print("不太安全")
+                print("超出专变安全限值")
                 return self.tf_capacity_w * remain_kVA
             else:
                 return 0
