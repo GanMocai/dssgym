@@ -282,9 +282,9 @@ class LoadProfile:
 
     def gen_loadprofile(self, scale=1.0):
         """
-        生成负载曲线并保存到指定文件夹. 重定义函数以匹配插值.
+        为所有的负荷生成标幺化曲线并保存到指定文件夹. 重定义函数以匹配插值.
         Args:
-            scale: 比例因子，用于缩放从csv读取得到的负载曲线数据
+            scale: 比例因子，用于缩放生成的负载曲线数据
         Returns:
             episodes: 生成的负载曲线的数量
         """
