@@ -258,10 +258,10 @@ class EVBMS:
             self.enable_power_demand = enable_power_demand
 
         # 判断是否启用功率需求计算
-        if not self.enable_power_demand:
+        if self.enable_power_demand is False:
             # 不启用功率需求计算，直接返回充电桩功率
             self.power_demand = 0.0  # 清空功率需求值
-            print(f"功率需求计算已禁用，直接使用充电桩功率: {charger_power:.2f} kW。")
+            print(f"功率需求已禁用，直接使用桩侧设置功率: {charger_power:.2f} kW。")
             return charger_power
 
         if self.charger_power is None:
