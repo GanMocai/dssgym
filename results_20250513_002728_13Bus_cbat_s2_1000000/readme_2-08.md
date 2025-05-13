@@ -2,14 +2,14 @@
 
 ## Case Pre-definition
 
-- 核心算例 01
+- 算例 08 关闭BMS，关闭容量基值（提供基于EV最大功率的标幺值）
 - BMS enable charger_power <= 10 可重设
 - cbat
-- s 1
+- s 2
 - num_steps 1,000,000
 - station_bus 680
 - charger_num 10
-- charger_kW [120] * 10
+- charger_kW \[120\] * 10
 - transformer_kVA': 800
 - EV_demand `D:\LENOVO\Documents\Python\ML\powergym\ev_demand\ev_demand-public_parking-general-250-A95.csv`
 - EV_PF -0.98
@@ -36,8 +36,9 @@ batt1,100,0.95,200,40
 
 ## Path
 
-- model_path `D:\LENOVO\Documents\Python\ML\powergym\results_20250509_213723_13Bus_cbat_1000000\model\ppo_model.zip`
-- 测试命令 `--model_path D:\LENOVO\Documents\Python\ML\powergym\results_20250509_213723_13Bus_cbat_1000000\model\ppo_model.zip --env_name 13Bus_cbat --test_only true`
+- model_path `D:\LENOVO\Documents\Python\ML\powergym\results_20250513_002728_13Bus_cbat_s2_1000000\model\ppo_model.zip`
+- 测试命令参数 `--model_path D:\LENOVO\Documents\Python\ML\powergym\results_20250513_002728_13Bus_cbat_s2_1000000\model\ppo_model.zip --env_name 13Bus --test_only true`
+  - 额外操作，在circuit中调整BMS和功率基值设置。
 
 ## Train Info
 
@@ -46,38 +47,37 @@ batt1,100,0.95,200,40
 运行时间、最后日志和奖励情况。
 
 ```text
-运行时间: 15938.27秒
 -----------------------------------------
 | rollout/                |             |
 |    ep_len_mean          | 96          |
-|    ep_rew_mean          | 2.15e+03    |
+|    ep_rew_mean          | 711         |
 | time/                   |             |
-|    fps                  | 65          |
+|    fps                  | 74          |
 |    iterations           | 489         |
-|    time_elapsed         | 15366       |
+|    time_elapsed         | 13444       |
 |    total_timesteps      | 1001472     |
 | train/                  |             |
-|    approx_kl            | 0.010945239 |
-|    clip_fraction        | 0.12        |
+|    approx_kl            | 0.005380501 |
+|    clip_fraction        | 0.0334      |
 |    clip_range           | 0.2         |
-|    entropy_loss         | -13.4       |
-|    explained_variance   | 1           |
+|    entropy_loss         | -15.3       |
+|    explained_variance   | 0.0672      |
 |    learning_rate        | 0.0003      |
-|    loss                 | 12.7        |
+|    loss                 | 3.33e+05    |
 |    n_updates            | 4880        |
-|    policy_gradient_loss | -0.0141     |
-|    std                  | 0.819       |
-|    value_loss           | 21.2        |
+|    policy_gradient_loss | -0.00478    |
+|    std                  | 0.979       |
+|    value_loss           | 4.25e+05    |
 -----------------------------------------
 
 训练过程奖励统计:
-  最小奖励: -11445.1123
-  最大奖励: 2188.6940
-  平均奖励: 1865.9523
-  奖励标准差: 1039.2907
+  最小奖励: -21795.9985
+  最大奖励: 2007.1355
+  平均奖励: 1127.1640
+  奖励标准差: 2777.8294
 警告: 检测到非常大的奖励值(>1000)，这可能导致训练不稳定。建议考虑奖励缩放。
-奖励数据已成功导出到: D:\LENOVO\Documents\Python\ML\powergym\results_20250509_213723_13Bus_cbat_1000000\rewards_in_training.csv
-模型已保存至 D:\LENOVO\Documents\Python\ML\powergym\results_20250509_213723_13Bus_cbat_1000000\model\ppo_model
-奖励函数权重已保存至 D:\LENOVO\Documents\Python\ML\powergym\results_20250509_213723_13Bus_cbat_1000000\reward_weights.csv.
-```
+奖励数据已成功导出到: D:\LENOVO\Documents\Python\ML\powergym\results_20250513_002728_13Bus_cbat_s2_1000000\rewards_in_training.csv
+模型已保存至 D:\LENOVO\Documents\Python\ML\powergym\results_20250513_002728_13Bus_cbat_s2_1000000\model\ppo_model
+奖励函数权重已保存至 D:\LENOVO\Documents\Python\ML\powergym\results_20250513_002728_13Bus_cbat_s2_1000000\reward_weights.csv.
 
+```
