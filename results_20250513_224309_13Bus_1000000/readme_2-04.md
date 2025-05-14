@@ -36,8 +36,8 @@ batt1,100,0.95,200,40
 
 ## Path
 
-- model_path ``
-- 测试命令参数 `--model_path  --env_name 13Bus --test_only true`
+- model_path `D:\LENOVO\Documents\Python\ML\powergym\results_20250513_224309_13Bus_1000000\model\ppo_model.zip`
+- 测试命令参数 `--model_path D:\LENOVO\Documents\Python\ML\powergym\results_20250513_224309_13Bus_1000000\model\ppo_model.zip --env_name 13Bus --test_only true`
 
 
 ## Train Info
@@ -47,5 +47,35 @@ batt1,100,0.95,200,40
 运行时间、最后日志和奖励情况。
 
 ```text
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 96          |
+|    ep_rew_mean          | 2.04e+03    |
+| time/                   |             |
+|    fps                  | 31          |
+|    iterations           | 489         |
+|    time_elapsed         | 32197       |
+|    total_timesteps      | 1001472     |
+| train/                  |             |
+|    approx_kl            | 0.008997658 |
+|    clip_fraction        | 0.0757      |
+|    clip_range           | 0.2         |
+|    entropy_loss         | -26.1       |
+|    explained_variance   | 1           |
+|    learning_rate        | 0.0003      |
+|    loss                 | 10.3        |
+|    n_updates            | 4880        |
+|    policy_gradient_loss | -0.0263     |
+|    value_loss           | 17.9        |
+-----------------------------------------
 
+训练过程奖励统计:
+  最小奖励: 1626.2761
+  最大奖励: 2073.6339
+  平均奖励: 1826.6251
+  奖励标准差: 105.4046
+警告: 检测到非常大的奖励值(>1000)，这可能导致训练不稳定。建议考虑奖励缩放。
+奖励数据已成功导出到: D:\LENOVO\Documents\Python\ML\powergym\results_20250513_224309_13Bus_1000000\rewards_in_training.csv
+模型已保存至 D:\LENOVO\Documents\Python\ML\powergym\results_20250513_224309_13Bus_1000000\model\ppo_model
+奖励函数权重已保存至 D:\LENOVO\Documents\Python\ML\powergym\results_20250513_224309_13Bus_1000000\reward_weights.csv.
 ```

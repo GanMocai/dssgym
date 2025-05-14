@@ -1,5 +1,10 @@
 
 
+## 测试信息
+
+### 原始控制台输出
+
+
 ```text
 环境初始化中，充电站母线为 680.
 There are 17 edges and 15 unique edges. Overlapping transformer edges
