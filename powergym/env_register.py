@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: MIT
 
 """
+Todo: 增加多充电站配置
+
 `env_register.py` 模块是 PowerGym 项目中的环境注册中心，负责管理和创建电力系统仿真环境。主要包含以下功能：
 
 1. 定义和存储各种电力系统的基本信息（`_SYS_INFO`），包括源节点、节点大小、标签偏移等显示参数
@@ -289,7 +291,7 @@ _ENV_INFO = {
     }
 }
 
-# 充电站信息 连接的母线名称、充电枪数目
+# 充电站信息列表 充电站名称、连接的母线名称、（单枪）充电桩数目及容量、专变容量
 _STATION_INFO = {
     '13Bus': {
         'bus_name': '680',  # 充电站连接的母线名称
@@ -297,6 +299,16 @@ _STATION_INFO = {
         'charger_kW': [120]*10, # 各充电桩容量
         'transformer_kVA': 800, # 设定专变的容量
         # 'ev_price': '13Bus_ev_price.csv',  # 电价文件
+        'station': [  # 充电站列表
+            {
+                'station_name': 'st01',  # 充电站名称
+                'bus_name': '680',  # 充电站连接的母线名称
+                'num_chargers': 10,  # 充电桩数量
+                'charger_kW': [120] * 10,  # 各充电桩容量
+                'transformer_kVA': 800,  # 设定专变的容量
+                # 'ev_price': '13Bus_ev_price.csv',  # 电价文件
+            },
+        ],
     },
     '34Bus': {
         'bus_name': '',  # 充电站连接的母线名称
@@ -356,9 +368,9 @@ for env in _ENV_INFO.keys():
     # 在info中添加 EV 充电需求队列文件路径
     _ENV_INFO[env].update(_EV_INFO[sys])
     # 在info中添加充电站相关充电完成率的权重
-    _ENV_INFO[env]['completion_w'] = 10.0/10.0 # 二轮常用值 10.0
-    _ENV_INFO[env]['connection_w'] = 2 * 10.0/10.0 / 250  # 按EV总数目归一化，同时又突出重要性
-    _ENV_INFO[env]['energy_w'] = 10.0/10.0  # 二轮常用值 10.0
+    _ENV_INFO[env]['completion_w'] = 10.0 # 二轮常用值 10.0 三轮常用值 1.0
+    _ENV_INFO[env]['connection_w'] = 2 * 10.0 / 250  # 按EV总数目归一化，同时又突出重要性
+    _ENV_INFO[env]['energy_w'] = 10.0  # 二轮常用值 10.0 三轮常用值 1.0
     # 显式设置电压越限惩罚权重
     _ENV_INFO[env]['voltage_w'] = 10.0
     _ENV_INFO[env]['tf_capacity_w'] = 10.0 / 200 # 按达到安全限值前计算 Note: 每次调整都需要更改统计中的超容量统计方式
