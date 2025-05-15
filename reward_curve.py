@@ -11,16 +11,25 @@
 """
 
 import argparse
+import datetime
+
 import pandas as pd
 import matplotlib.pyplot as plt
 
-font = {'family': 'SimSun',  # 宋体
-        'weight': 'bold',
-        'size': '16'}
-plt.rc('font', **font)  # 步骤一（设置字体的更多属性）
-plt.rc('axes', unicode_minus=False)  # 步骤二（解决坐标轴负数的负号显示问题）
+# 定义中英文字体映射
+plt.rcParams['font.family'] = ['serif', 'sans-serif']
+# # 设置英文和数字字体为 Times New Roman
+plt.rcParams['font.serif'] = ['Times New Roman'] + plt.rcParams['font.serif']
+# 设置中文字体为宋体
+plt.rcParams['font.sans-serif'] = ['SimSun'] + plt.rcParams['font.sans-serif']
+# 解决坐标轴负数的负号显示问题
+plt.rcParams['axes.unicode_minus'] = False
 
-def plot_training_reward(csv_path):
+# 其他字体属性设置
+# plt.rcParams['font.weight'] = 'bold'
+plt.rcParams['font.size'] = 12
+
+def plot_training_reward(csv_path, index:int=0):
     df = pd.read_csv(csv_path)
     # episodes = df["step"]  # 命名成step了，尴尬，太赶了
     # rewards = df["reward"]
@@ -40,23 +49,23 @@ def plot_training_reward(csv_path):
 
     # print(episodes, rewards, rewards_ma)
 
-    plt.figure(figsize=(10, 6))
+    plt.figure(figsize=(16/2.54, 10/2.54))
     plt.plot(episodes, rewards, 'b-', alpha=0.3, label="单回合奖励")
     plt.plot(episodes, rewards_ma, 'r-', linewidth=2, label="移动平均奖励")
     # 自动调整Y轴范围，使图像更清晰
     # 设置合理的Y轴范围，排除极端值的影响——1-3需要
-    # reward_q1 = pd.Series(rewards).quantile(0.00005)  # 5%分位数
-    # reward_q3 = pd.Series(rewards).quantile(1)  # 95%分位数
-    # y_min = max(reward_q1 * 1.5, min(rewards_ma) * 1.2)  # 确保能显示移动平均线
-    # y_max = min(reward_q3 * 1.5, max(rewards_ma) * 1.2)  # 确保能显示移动平均线
-    # plt.ylim(y_min, y_max)
+    reward_q1 = pd.Series(rewards).quantile(0.000005)  # 5%分位数
+    reward_q3 = pd.Series(rewards).quantile(1)  # 95%分位数
+    y_min = max(reward_q1 / 1.5, min(rewards_ma) / 1.2)  # 确保能显示移动平均线
+    y_max = min(reward_q3 * 1.5, max(rewards_ma) * 1.2)  # 确保能显示移动平均线
+    plt.ylim(y_min, y_max)
 
     plt.xlabel("回合")
     plt.ylabel("奖励")
     plt.title("训练过程奖励曲线")
-    plt.legend()
+    plt.legend(loc='upper left', borderaxespad=0)
     plt.grid(True)
-    plt.savefig('training_reward_curve.png', dpi=300)  # 保存图像
+    plt.savefig(f'training_reward_curve_{index:02d}_{datetime.datetime.now().strftime("%Y%m%d")}.png', dpi=300)  # 保存图像
     plt.show()
 
 
@@ -90,20 +99,31 @@ def main():
 if __name__ == "__main__":
     # main()
     path = ['0']
-    path_1 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250501_021615_13Bus_cbat_1000000_01\rewards_in_training.csv'
-    path_2 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250502_005245_13Bus_cbat_s2_1000000_02\rewards_in_training.csv'
-    path_3 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250502_125646_13Bus_1000000_03\rewards_in_training.csv'
-    path_4 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250503_091058_13Bus_cbat_1000000_04\rewards_in_training.csv'
-    path_5 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250503_124337_13Bus_cbat_s2_1000000_05\rewards_in_training.csv'
-    path_6 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250503_165005_13Bus_1000000_06\rewards_in_training.csv'
-    path_7 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250504_012306_13Bus_cbat_1000000_07\rewards_in_training.csv'
-    path_8 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250504_055308_13Bus_cbat_1000000_08\rewards_in_training.csv'
-    path.append(path_1)
-    path.append(path_2)
-    path.append(path_3)
-    path.append(path_4)
-    path.append(path_5)
-    path.append(path_6)
-    path.append(path_7)
-    path.append(path_8)
-    plot_training_reward(path[8])
+    # path_1 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250501_021615_13Bus_cbat_1000000_01\rewards_in_training.csv'
+    # path_2 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250502_005245_13Bus_cbat_s2_1000000_02\rewards_in_training.csv'
+    # path_3 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250502_125646_13Bus_1000000_03\rewards_in_training.csv'
+    # path_4 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250503_091058_13Bus_cbat_1000000_04\rewards_in_training.csv'
+    # path_5 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250503_124337_13Bus_cbat_s2_1000000_05\rewards_in_training.csv'
+    # path_6 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250503_165005_13Bus_1000000_06\rewards_in_training.csv'
+    # path_7 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250504_012306_13Bus_cbat_1000000_07\rewards_in_training.csv'
+    # path_8 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250504_055308_13Bus_cbat_1000000_08\rewards_in_training.csv'
+    # path.append(path_1)
+    # path.append(path_2)
+    # path.append(path_3)
+    # path.append(path_4)
+    # path.append(path_5)
+    # path.append(path_6)
+    # path.append(path_7)
+    # path.append(path_8)
+    path_list = [
+        r'D:\LENOVO\Documents\Python\ML\powergym\results_20250509_213723_13Bus_cbat_1000000\rewards_in_training.csv',
+        r'D:\LENOVO\Documents\Python\ML\powergym\results_20250510_132849_13Bus_cbat_1000000\rewards_in_training.csv',
+        r'D:\LENOVO\Documents\Python\ML\powergym\results_20250510_194947_13Bus_cbat_1000000\rewards_in_training.csv',
+        r'D:\LENOVO\Documents\Python\ML\powergym\results_20250513_224309_13Bus_1000000\rewards_in_training.csv',
+        r'D:\LENOVO\Documents\Python\ML\powergym\results_20250511_121502_13Bus_cbat_s2_1000000\rewards_in_training.csv',
+        r'D:\LENOVO\Documents\Python\ML\powergym\results_20250512_143129_13Bus_cbat_1000000\rewards_in_training.csv',
+        r'D:\LENOVO\Documents\Python\ML\powergym\results_20250514_092650_13Bus_1000000\rewards_in_training.csv',
+        r'D:\LENOVO\Documents\Python\ML\powergym\results_20250513_002728_13Bus_cbat_s2_1000000\rewards_in_training.csv',
+    ]
+    for index, path in enumerate(path_list):
+        plot_training_reward(path, index+1)

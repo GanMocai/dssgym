@@ -354,7 +354,7 @@ def visualize_ev_schedule(charging_powers, ev_ids):
 
 def visualize_ev_schedule_revised(charging_powers, ev_ids, storage_data=None, pv_data=None, transformer_capacity=800):
     """
-    可视化EV充电调度，包括储能放电功率、光伏功率和视在功率
+    可视化EV充电调度，包括储能放电功率、光伏功率和视在功率。
 
     Args:
         charging_powers (ndarray): 充电功率数据
@@ -365,11 +365,15 @@ def visualize_ev_schedule_revised(charging_powers, ev_ids, storage_data=None, pv
     Returns:
         Figure: Matplotlib图形对象
     """
+    # 设置图表尺寸
+    width_inches = 22 / 2.54  # 转换为英寸
+    height_inches = width_inches * (8 / 12)
+
     # # 创建共享X轴的两个子图
-    # fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(22 / 2.54, (22 / 2.54) * (8 / 12)), sharex=True)
+    # fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(width_inches, height_inches), sharex=True)
 
     # 创建共享X轴的两个子图，第一个子图占据2/3的纵向空间
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(22 / 2.54, (22 / 2.54) * (8 / 12)), sharex=True,
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(width_inches, height_inches), sharex=True,
                                    gridspec_kw={'height_ratios': [2, 1]})  # 设置高度比例为2:1
 
     # 自定义颜色映射
@@ -380,11 +384,11 @@ def visualize_ev_schedule_revised(charging_powers, ev_ids, storage_data=None, pv
                     vmin=0, vmax=120, interpolation='nearest')
 
     # 配置第一个子图
+    ax1.set_title('电动汽车实际充电功率热图')
     ax1.set_ylabel('车辆编号')
-    ax1.set_title('电动汽车实际充电功率热力图')
 
     # 添加颜色条
-    cbar_ax = fig.add_axes([0.01, 0.10, 0.01, 0.8])  # [左, 下, 宽, 高]
+    cbar_ax = fig.add_axes([0.01, 0.10, 0.01, 0.80])  # [左, 下, 宽, 高]
     cbar = fig.colorbar(im, cax=cbar_ax, label='充电功率 (kW)')
 
     # 设置纵轴标签为EV ID
@@ -403,56 +407,72 @@ def visualize_ev_schedule_revised(charging_powers, ev_ids, storage_data=None, pv
         ax1.set_yticks(positions)
         ax1.set_yticklabels(formatted_ids)
 
-    # 在下方子图中绘制总功率曲线
+    # 第二个子图
+    # 设置颜色、线条样式、线宽、透明度
+    colors = ['#e41a1c', '#377eb8', '#4daf4a', '#ff7f00', '#800080']
+    linestyles = ['--', '-', '-', ':', '-']
+    linewidths = [1, 1, 1, 1, 1.5]
+    alphas = [0.5, 0.9, 0.9, 0.5, 0.7]
     time_steps = np.arange(charging_powers.shape[1])
-    total_power = np.sum(charging_powers, axis=0)
-    ax2.plot(time_steps, total_power, 'b-', linewidth=2, label='总EV充电功率')
+    # EV充电有功功率曲线
+    ev_total_active_power = np.sum(charging_powers, axis=0)
+    ax2.plot(time_steps, ev_total_active_power, color=colors[0], linestyle=linestyles[0],
+             linewidth=linewidths[0], alpha=alphas[0], label='总汽车充电有功功率')
     
-    # 计算视在功率 (假设功率因数为0.98)
-    phi_ev = math.acos(0.98)
-    ev_reactive_power = total_power * math.tan(phi_ev)
+    # 计算EV无功功率
+    phi_ev = math.acos(-0.98)
+    ev_reactive_power = ev_total_active_power * math.tan(phi_ev)
     
-    # 初始化净有功功率和净无功功率
-    net_active_power = total_power.copy()
-    net_reactive_power = ev_reactive_power.copy()
+    # 初始化专变内净有功功率和净无功功率
+    station_active_power = ev_total_active_power.copy()
+    station_reactive_power = ev_reactive_power.copy()
     
     # 绘制储能放电功率（如果有）
     if storage_data is not None:
         bs_ids, discharging_powers = storage_data
         total_discharge = np.sum(discharging_powers, axis=0)
-        ax2.plot(time_steps[:len(total_discharge)], total_discharge, 'r-', linewidth=2, label='储能放电功率')
+        ax2.plot(time_steps[:len(total_discharge)], total_discharge, color=colors[1], linestyle=linestyles[1],
+             linewidth=linewidths[1], alpha=alphas[1], label='储能放电有功功率')
         
-        # 更新净有功功率 (假设储能功率因数为0.95)
+        # 更新站内有功功率
         phi_storage = math.acos(0.95)
         storage_reactive_power = total_discharge * math.tan(phi_storage)
-        net_active_power -= total_discharge[:len(net_active_power)]  # 储能放电减少净负荷
-        net_reactive_power -= storage_reactive_power[:len(net_reactive_power)]
+        station_active_power -= total_discharge[:len(station_active_power)]  # 储能放电减少净负荷
+        station_reactive_power -= storage_reactive_power[:len(station_reactive_power)]
     
     # 绘制光伏功率（如果有）
     if pv_data is not None and len(pv_data) > 0:
         # 确保光伏数据长度与时间步数匹配
         if len(pv_data) >= len(time_steps):
-            ax2.plot(time_steps, pv_data[:len(time_steps)], 'g-', linewidth=2, label='光伏功率')
+            ax2.plot(time_steps, pv_data[:len(time_steps)], color=colors[2], linestyle=linestyles[2],
+             linewidth=linewidths[2], alpha=alphas[2], label='光伏出力有功功率')
             # 更新净有功功率 (光伏减少负荷)
-            net_active_power -= pv_data[:len(time_steps)]
+            station_active_power -= pv_data[:len(time_steps)]
         else:
             # 如果光伏数据不够长，则填充零值
             pv_extended = np.concatenate([pv_data, np.zeros(len(time_steps) - len(pv_data))])
-            ax2.plot(time_steps, pv_extended, 'g-', linewidth=2, label='光伏功率')
+            ax2.plot(time_steps, pv_extended, color=colors[2], linestyle=linestyles[2],
+             linewidth=linewidths[2], alpha=alphas[2], label='光伏出力有功功率')
             # 更新净有功功率
-            net_active_power -= pv_extended
+            station_active_power -= pv_extended
     
-    # 计算视在功率
-    apparent_power = np.sqrt(net_active_power**2 + net_reactive_power**2)
-    ax2.plot(time_steps, apparent_power, 'purple', linestyle='-.', linewidth=2, label='充电站视在功率')
+    # 绘制整站功率曲线
+    ax2.plot(station_active_power, color=colors[3], linestyle=linestyles[3],
+             linewidth=linewidths[3], alpha=alphas[3], label='充电站有功功率')
+    station_apparent_power = np.sqrt(station_active_power**2 + station_reactive_power**2)
+    ax2.plot(time_steps, station_apparent_power, color=colors[4], linestyle=linestyles[4],
+             linewidth=linewidths[4], alpha=alphas[4], label='充电站视在功率')
     
     # 添加专变容量限制线
     ax2.axhline(y=transformer_capacity, color='red', linestyle='--', alpha=0.7, linewidth=2, label=f'专变容量限制 ({transformer_capacity}kVA)')
-    
+
+    # 配置第二个子图
+    ax2.grid(True, linestyle='--', alpha=0.7)
+    ax2.legend(loc='upper right', borderaxespad=0, fontsize=8)
     # 设置Y轴范围，确保所有曲线都能显示
     all_powers = np.concatenate([
-        total_power, 
-        apparent_power,
+        ev_total_active_power,
+        station_apparent_power,
         [0, transformer_capacity * 1.1]  # 确保限制线可见并有一些余量
     ])
     
@@ -469,19 +489,16 @@ def visualize_ev_schedule_revised(charging_powers, ev_ids, storage_data=None, pv
     y_min = max(min(0, np.min(all_powers) - 10), -50)  # 下限不低于-50
     y_max = max(np.max(all_powers) + 10, transformer_capacity * 1.1)
     ax2.set_ylim(y_min, y_max)
-    
-    ax2.set_xlim(0, charging_powers.shape[1] - 1)
     ax2.set_ylabel('功率 (kW/kVA)')
-    ax2.set_xlabel('时间 (时:分)')
-    ax2.grid(True, linestyle='--', alpha=0.7)
-    ax2.legend(loc='upper right', fontsize=8)
 
+    ax2.set_xlim(0, charging_powers.shape[1] - 1)
     # 设置横轴为实际时刻（每个时间步为15分钟）
     T = charging_powers.shape[1]
     tick_positions = np.arange(0, T, 4)
     tick_labels = [f"{j // 4 :02d}:00" if j % 4 == 0 else "" for j in tick_positions]
     ax2.set_xticks(tick_positions)
     ax2.set_xticklabels(tick_labels, fontsize=8)
+    ax2.set_xlabel('时间 (时:分)')
 
     # 添加垂直分隔线表示每6小时
     for hour in range(6, 24, 6):
@@ -492,118 +509,6 @@ def visualize_ev_schedule_revised(charging_powers, ev_ids, storage_data=None, pv
     plt.subplots_adjust(right=0.99, left=0.15, bottom=0.08, top=0.95)
 
     return plt.gcf()
-
-
-def visualize_charging_schedule_with_batteries(results, title=None):
-    """
-    可视化充电计划以及PV、储能数据，使用统一的显示风格，标注使用中文。
-
-    Args:
-        results (dict): 优化结果字典，包含ev_schedule、pv_power、battery_charge等信息
-        title (str, optional): 自定义图表标题
-    """
-    # 提取结果数据
-    charging_data = results['ev_schedule']
-    pv_power = results['pv_power']
-    battery_charge = results['battery_charge']
-    battery_discharge = results['battery_discharge']
-    # 可以直接从ev_power中取出充电站功率，也可以从charging_data.sum计算
-    station_active_power = results['ev_power']['CS1'] if 'ev_power' in results else charging_data.sum(axis=0)
-
-    # 获取数据维度
-    Num_EVs = charging_data.shape[0]
-    T = charging_data.shape[1]
-
-    # 如果有station_net_load_p和station_net_load_q，计算视在功率
-    if 'station_net_load_p' in results and 'station_net_load_q' in results:
-        station_apparent_power = [np.sqrt(p ** 2 + q ** 2) for p, q in
-                                  zip(results['station_net_load_p'], results['station_net_load_q'])]
-    else:
-        # 根据结果重新计算视在功率
-        ev = results['ev_power']['CS1']
-        pv = results['pv_power']
-        bc = results['battery_charge']
-        bd = results['battery_discharge']
-        phi_ev = math.acos(-0.98)
-        phi_b = math.acos(0.95)
-        station_apparent_power = []
-        for p_ev, p_pv, bc_t, bd_t in zip(ev, pv, bc, bd):
-            p_net = p_ev - p_pv + bc_t - bd_t
-            q_net = p_ev * math.tan(phi_ev) + (bc_t - bd_t) * math.tan(phi_b)
-            station_apparent_power.append(math.sqrt(p_net ** 2 + q_net ** 2))
-
-    # 将MW转换为kW显示
-    if max(station_active_power) < 1.0:
-        pv_power = [p * 1000 for p in pv_power]
-        battery_charge = [b * 1000 for b in battery_charge]
-        battery_discharge = [b * 1000 for b in battery_discharge]
-        station_apparent_power = [s * 1000 for s in station_apparent_power]
-
-    # 获取充电站功率限制
-    Power_Station = 800  # 默认值800kVA，如果在结果中有定义则使用结果中的值
-
-    # 设置图表尺寸
-    width_inches = 22 / 2.54  # 转换为英寸
-    height_inches = width_inches * (8 / 12)
-
-    # 创建共享X轴的两个子图
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(width_inches, height_inches), sharex=True)
-
-    # 自定义颜色映射
-    custom_cmap = ListedColormap(['white'] +
-                                 [plt.cm.YlOrRd(i) for i in np.linspace(0, 1, 100)])
-
-    # 绘制热图
-    im = ax1.imshow(charging_data, aspect='auto', cmap=custom_cmap,
-                    vmin=0, vmax=120, interpolation='nearest')
-
-    # 配置第一个子图
-    if title:
-        ax1.set_title(title)
-    ax1.set_ylabel('车辆编号')
-
-    # 添加颜色条
-    cbar_ax = fig.add_axes([0.06, 0.15, 0.02, 0.7])  # [左, 下, 宽, 高]
-    cbar = fig.colorbar(im, cax=cbar_ax, label='充电功率 (kW)')
-
-    # 绘制功率曲线
-    ax2.plot(station_active_power, color='blue', label='充电站有功功率')
-    ax2.plot(station_apparent_power, color='purple', linestyle='-.', label='充电站视在功率')
-    ax2.plot(pv_power, color='green', label='PV有功功率')
-
-    # 绘制EV充电有功功率
-    ev_only_power = np.array(results['ev_power']['CS1']) * 1000 if max(station_active_power) < 1.0 else np.array(results['ev_power']['CS1'])
-    ax2.plot(ev_only_power, color='red', linestyle=':', label='EV充电有功功率')
-
-    # 绘制储能充放电功率
-    battery_power = np.array(battery_discharge) - np.array(battery_charge)
-    ax2.plot(battery_power, color='orange', label='储能净功率\n(正值为放电)')
-
-    # 添加充电站功率限制线
-    ax2.axhline(y=Power_Station, color='red', linestyle='--', label='充电站专变容量')
-
-    # 配置第二个子图
-    ax2.set_ylabel('功率 (kW)')
-    # 设置Y轴范围，确保所有曲线都能显示
-    all_powers = np.concatenate([station_active_power, pv_power, battery_power, station_apparent_power])
-    y_min = min(min(all_powers) - 10, -10)
-    y_max = max(max(station_apparent_power) + 10, Power_Station + 10)
-    ax2.set_ylim(y_min, y_max)
-
-    # 设置横轴为实际时刻（每个时间步为15分钟）
-    tick_positions = np.arange(0, T, 4)
-    tick_labels = [f"{j // 4 :02d}:00" if j % 4 == 0 else "" for j in tick_positions]
-    ax2.set_xticks(tick_positions)
-    ax2.set_xticklabels(tick_labels, fontsize=8)
-    ax2.set_xlabel('时间 (时:分)')
-
-    # 将第二个子图的图例移到图表内部
-    ax2.legend(loc='upper right', borderaxespad=0, fontsize=8)
-
-    # 调整布局，为左侧的颜色条留出更多空间
-    plt.subplots_adjust(right=0.95, left=0.18, bottom=0.05, top=0.95)
-
-    return fig, (ax1, ax2)
 
 
 def load_voltage_data(file_path, excluded_nodes=None):
@@ -831,6 +736,9 @@ def test_results_analysis(results_dir, index=0):
         results_dir (str): 结果目录路径
         index (int): 图片后缀
     """
+    if results_dir == '':
+        print(f'空字符串，跳过{index}不做分析。')
+        return
     # 生成统计数据
     stats = generate_summary_stats(results_dir)
 
@@ -841,12 +749,11 @@ def test_results_analysis(results_dir, index=0):
     print(f"平均满足率: {stats['average_satisfaction']:.2%}")
     print(f"总充电电量: {stats['total_charging_energy']:.2f} kWh")
     print(f"平均单车充电量: {stats['avg_ev_energy']:.2f} kWh")
-    print(f"最大总EV充电功率: {stats['max_charging_power']:.2f} kW")
+    print(f"最大总汽车充电功率: {stats['max_charging_power']:.2f} kW")
     print(f"超专变容量运行时长: {stats['overload_hours']:.2f} 小时")
-    print(f"总PV发电量: {stats['total_pv_energy']:.2f} kWh")
-    print(f"电压低于0.95标幺值比例: {stats['undervoltage_ratio']:.2f}%")
-    print(f"电压高于1.05标幺值比例: {stats['overvoltage_ratio']:.2f}%")
-    print("==========================")
+    print(f"总光伏发电量: {stats['total_pv_energy']:.2f} kWh")
+    print(f"电压低于0.95p.u.比例: {stats['undervoltage_ratio']:.2f}%")
+    print(f"电压高于1.05p.u.比例: {stats['overvoltage_ratio']:.2f}%")
 
     # 读取充电调度文件
     charging_files = os.path.join(results_dir, 'schedule.csv')
@@ -897,7 +804,7 @@ def test_results_analysis(results_dir, index=0):
         voltage_output_file = os.path.join(os.getcwd(), f'voltage_profile_{index:02}_{datetime.datetime.now().strftime("%Y%m%d")}.png')
         voltage_fig.savefig(voltage_output_file)
         print(f"节点电压图已保存至: {voltage_output_file}")
-
+    print("==========================")
     return stats
 
 
@@ -906,38 +813,21 @@ if __name__ == "__main__":
     # 旧测试结果
     # path_list = [
     #     r'D:\LENOVO\Documents\Python\ML\powergym\results_20250501_021615_13Bus_cbat_1000000_01\test_results_20250501_073028',
-    #
-    #
     #     r'D:\LENOVO\Documents\Python\ML\powergym\results_20250502_005245_13Bus_cbat_s2_1000000_02\test_results_20250502_065405',
-    #
-    #
     #     r'D:\LENOVO\Documents\Python\ML\powergym\results_20250502_125646_13Bus_1000000_03\test_results_20250502_214808',
-    #
-    #
     #     r'D:\LENOVO\Documents\Python\ML\powergym\results_20250503_091058_13Bus_cbat_1000000_04\test_results_20250503_123842',
-    #
-    #
     #     r'D:\LENOVO\Documents\Python\ML\powergym\results_20250503_124337_13Bus_cbat_s2_1000000_05\test_results_20250503_164645',
-    #
-    #
     #     r'D:\LENOVO\Documents\Python\ML\powergym\results_20250503_165005_13Bus_1000000_06\test_results_20250504_011214',
-    #
-    #
     #     r'D:\LENOVO\Documents\Python\ML\powergym\results_20250504_012306_13Bus_cbat_1000000_07\test_results_20250504_052230',
-    #
-    #
     #     r'D:\LENOVO\Documents\Python\ML\powergym\results_20250504_055308_13Bus_cbat_1000000_08\test_results_20250504_093552',
-    #
-    #
     # ]
     # rules_agent_path = r'D:\LENOVO\Documents\Python\ML\powergym\test_results_rules_20250506_200736_13Bus_cbat'
 
     # 演示结果路径
     demo_path_list = [
-        r'D:\LENOVO\Documents\Python\ML\powergym\results_20250511_002004_13Bus_1000000\test_results_20250511_021621',  # 提供最大功率容量，启用BMS
-        r'D:\LENOVO\Documents\Python\ML\powergym\results_20250512_215620_13Bus_1000000\test_results_20250513_001904',  # 按电池最大充电功率，不启用BMS
+        r'D:\LENOVO\Documents\Python\ML\powergym\results_20250511_002004_13Bus_1000000\test_results_20250511_021621',  # 提供最大功率容量，启用BMS -2 演示2
+        r'D:\LENOVO\Documents\Python\ML\powergym\results_20250512_215620_13Bus_1000000\test_results_20250513_001904',  # 按电池最大充电功率，不启用BMS -1 演示1
     ]
-
     for i in range(len(demo_path_list)):
         test_results_analysis(demo_path_list[i], i-2)
 
@@ -946,23 +836,18 @@ if __name__ == "__main__":
         r'D:\LENOVO\Documents\Python\ML\powergym\results_20250509_213723_13Bus_cbat_1000000\test_results_20250510_115601',
         r'D:\LENOVO\Documents\Python\ML\powergym\results_20250510_132849_13Bus_cbat_1000000\test_results_20250510_182929',
         r'D:\LENOVO\Documents\Python\ML\powergym\results_20250510_194947_13Bus_cbat_1000000\test_results_20250511_001130',
-
+        r'D:\LENOVO\Documents\Python\ML\powergym\results_20250513_224309_13Bus_1000000\test_results_20250514_073953',
         r'D:\LENOVO\Documents\Python\ML\powergym\results_20250511_121502_13Bus_cbat_s2_1000000\test_results_20250511_172037',
         r'D:\LENOVO\Documents\Python\ML\powergym\results_20250512_143129_13Bus_cbat_1000000\test_results_20250512_215128',
-
+        r'D:\LENOVO\Documents\Python\ML\powergym\results_20250514_092650_13Bus_1000000\test_results_20250514_183833',
         r'D:\LENOVO\Documents\Python\ML\powergym\results_20250513_002728_13Bus_cbat_s2_1000000\test_results_20250513_041136',
     ]
-    # rules_agent测试结果路径
-    rules_agent_path = r'D:\LENOVO\Documents\Python\ML\powergym\test_results_rules_20250513_152400_13Bus_cbat'
-
-
     for i in range(len(path_list)):
         test_results_analysis(path_list[i], i+1)
 
-
+    # rules_agent测试结果路径
+    rules_agent_path = r'D:\LENOVO\Documents\Python\ML\powergym\test_results_rules_20250513_152400_13Bus_cbat'
     test_results_analysis(rules_agent_path, 0)
+
     pass
-
-
-
 
