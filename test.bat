@@ -11,5 +11,5 @@ D:/LENOVO/anaconda3/envs/ML/python.exe D:/LENOVO/Documents/Python/ML/powergym/pp
 D:/LENOVO/anaconda3/envs/ML/python.exe D:/LENOVO/Documents/Python/ML/powergym/ppo_agent.py --model_path D:\LENOVO\Documents\Python\ML\powergym\results_20250504_012306_13Bus_cbat_1000000_07\model\ppo_model.zip --env_name 13Bus_cbat --test_only true
 D:/LENOVO/anaconda3/envs/ML/python.exe D:/LENOVO/Documents/Python/ML/powergym/ppo_agent.py --model_path D:\LENOVO\Documents\Python\ML\powergym\results_20250504_055308_13Bus_cbat_1000000_08\model\ppo_model.zip --env_name 13Bus_cbat --test_only true
 
-REM 不可行，powergym.powergym无法被识别为模块 ModuleNotFoundError: No module named 'powergym.powergym'
+REM 不可行，基于根目录的相对路径powergym.powergym无法被识别为模块 ModuleNotFoundError: No module named 'powergym.powergym'
 pause
