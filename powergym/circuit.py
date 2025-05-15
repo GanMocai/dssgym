@@ -153,12 +153,13 @@ class Circuits:
 
                     if full_name in self.batteries:
                         batt = self.batteries[full_name]
-                        kw = batt.state_projection(nkws_or_states[idx_in_nkws_or_states], self.ev_station.charger_kW[charger_id])  # 提供的kW容量 , self.ev_station.charger_kW[charger_id]
+                        kw = batt.state_projection(nkws_or_states[idx_in_nkws_or_states]), self.ev_station.charger_kW[charger_id]  # 提供kW容量作为基值: , self.ev_station.charger_kW[charger_id]
                         if hasattr(self.ev_controller, 'bms_instances') and full_name in self.ev_controller.bms_instances:
                             bms = self.ev_controller.bms_instances[full_name]
-                            kw = -bms.calculate_charge_power(-kw)  # 时刻注意符号变换  , enable_power_demand=False
+                            kw = -bms.calculate_charge_power(-kw)  # 时刻注意符号变换，关闭EVBMS: , enable_power_demand=False
                         kvar = kw * np.tan(np.arccos(batt.pf))
                         bat2kwkvar[batt.name[8:]] = (kw, kvar)
+
         # # 原设置电池对象——使用功率因数进行计算的方式有问题，把AI带歪了
         # bat2kwkvar = dict()
         # for i, bat in enumerate(self.batteries.keys()):  # 索引，key
@@ -1026,32 +1027,45 @@ class Battery(Node):
             kW_base = base_kW
         if self.bat_act_num == np.inf:
             kw = max(-1.0, min(1.0, nkw_or_state)) * kW_base
-            if kw > 0:
+            if kw > 0:  # 放电
                 kw = min(self.kwh / self.duration, kw)
-            else:
+            else:  # 充电
                 kw = max((self.kwh - self.max_kwh) / self.duration, kw)
             self.kw = kw
             return kw
         else:
-            state = max(0, min(len(self.avail_kw) - 1, nkw_or_state))
-            mid = len(self.avail_kw) // 2
-            if state > mid:  # discharging
-                allowed_kw = self.kwh / self.duration  # max kw
-                if self.avail_kw[state] > allowed_kw:
-                    state = int(state - np.ceil((self.avail_kw[state] - allowed_kw) / \
-                                                (self.avail_kw[1] - self.avail_kw[0]) - 1e-8))
-            elif state < mid:  # charging
-                allowed_kw = (self.kwh - self.max_kwh) / self.duration  # min kw
-                if self.avail_kw[state] < allowed_kw:
-                    state = int(state + np.ceil((allowed_kw - self.avail_kw[state]) / \
-                                                (self.avail_kw[1] - self.avail_kw[0]) - 1e-8))
-            self.state = state
             if base_kW is None:
+                state = max(0, min(len(self.avail_kw) - 1, nkw_or_state))
+                mid = len(self.avail_kw) // 2
+                if state > mid:  # discharging
+                    allowed_kw = self.kwh / self.duration  # max kw
+                    if self.avail_kw[state] > allowed_kw:
+                        state = int(state - np.ceil((self.avail_kw[state] - allowed_kw) / \
+                                                    (self.avail_kw[1] - self.avail_kw[0]) - 1e-8))
+                elif state < mid:  # charging
+                    allowed_kw = (self.kwh - self.max_kwh) / self.duration  # min kw
+                    if self.avail_kw[state] < allowed_kw:
+                        state = int(state + np.ceil((allowed_kw - self.avail_kw[state]) / \
+                                                    (self.avail_kw[1] - self.avail_kw[0]) - 1e-8))
+                self.state = state
                 return self.avail_kw[state]
             else:
                 diff = kW_base / self.bat_act_num
                 mode_num = self.bat_act_num // 2
                 avail_kw = [n * diff for n in range(-mode_num, mode_num + 1)]
+                state = max(0, min(len(avail_kw) - 1, nkw_or_state))
+                mid = len(avail_kw) // 2
+                if state > mid:  # discharging
+                    allowed_kw = self.kwh / self.duration  # max kw
+                    if avail_kw[state] > allowed_kw:
+                        state = int(state - np.ceil((avail_kw[state] - allowed_kw) / \
+                                                    (avail_kw[1] - avail_kw[0]) - 1e-8))
+                elif state < mid:  # charging
+                    allowed_kw = (self.kwh - self.max_kwh) / self.duration  # min kw
+                    if avail_kw[state] < allowed_kw:
+                        state = int(state + np.ceil((allowed_kw - avail_kw[state]) / \
+                                                    (avail_kw[1] - avail_kw[0]) - 1e-8))
+                self.state = state
                 return avail_kw[state]
 
     def step_before_solve(self, nkw_or_state):
@@ -1211,7 +1225,7 @@ class BatteryController:
             self.bms_instances[bat_name] = bms
             has_bms = '，并创BMS'
 
-        print(f"已连接电池 {name}, 初始SOC: {initial_soc * 100}%, 最大功率: {max_kw}kW, 电池容量: {max_kwh}kWh{has_bms}。")
+        print(f"已连接 {name}, 初始SOC: {initial_soc * 100}%, 最大功率: {max_kw}kW, 电池容量: {max_kwh}kWh{has_bms}。")
         return name
 
     def disconnect_battery(self, name):
@@ -1809,7 +1823,6 @@ class BatteryStationManager:
             self.battery_connection_points_history[idx] = connection_point_id
 
             print(f"时间步 {self.current_step} 执行前: 排队电池 {name} 已接入")
-
 
     def update_statistics(self, update_type, **kwargs) -> None:
         """统一更新统计信息的函数
