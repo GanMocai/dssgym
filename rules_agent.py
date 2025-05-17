@@ -18,7 +18,7 @@ import argparse
 
 from matplotlib import pyplot as plt
 
-from powergym.ppo_agent import make_env, parse_arguments, seeding
+from dssgym.ppo_agent import make_env, parse_arguments, seeding
 
 
 class RulesAgent:

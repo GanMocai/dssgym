@@ -5,7 +5,7 @@
 """
 Todo: 增加多充电站配置
 
-`env_register.py` 模块是 PowerGym 项目中的环境注册中心，负责管理和创建电力系统仿真环境。主要包含以下功能：
+`env_register.py` 模块是 DSSGym 项目中的环境注册中心，负责管理和创建电力系统仿真环境。主要包含以下功能：
 
 1. 定义和存储各种电力系统的基本信息（`_SYS_INFO`），包括源节点、节点大小、标签偏移等显示参数
 2. 维护不同环境配置（`_ENV_INFO`），提供多种预设环境，包括：
@@ -19,7 +19,7 @@ Todo: 增加多充电站配置
    - `make_env`：创建环境实例，支持并行环境创建
    - `remove_parallel_dss`：清理并行环境创建的临时文件
 
-该模块作为 PowerGym 的入口点，简化了强化学习算法与电力系统仿真的对接，便于研究人员测试不同控制策略在各种电网拓扑下的性能。
+该模块作为 DSSGym 的入口点，简化了强化学习算法与电力系统仿真的对接，便于研究人员测试不同控制策略在各种电网拓扑下的性能。
 
 Note: 比例因子 scale 为负载曲线倍数，缩放从csv读取得到的负载曲线数据。
 
@@ -31,7 +31,7 @@ Improve:
 import os
 import inspect
 import re
-from powergym.powergym.env import Env
+from dssgym.dssgym.env import Env
 
 # map from system_name to fixed information of the system
 # 系统名称到对应固定信息的映射，包括并网点、node数量、标签偏移等参数。
@@ -336,7 +336,7 @@ _STATION_INFO = {
 # 充电需求队列信息
 _EV_INFO = {
     '13Bus': {
-        'ev_demand': r'D:\LENOVO\Documents\Python\ML\powergym\ev_demand\ev_demand-public_parking-general-250-A95.csv',  # 充电需求文件
+        'ev_demand': r'D:\LENOVO\Documents\Python\ML\dssgym\ev_demand\ev_demand-public_parking-general-250-A95.csv',  # 充电需求文件
     },
     '34Bus': {
         'ev_demand': '34Bus_ev_demand.csv',  # 充电需求文件

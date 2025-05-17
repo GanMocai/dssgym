@@ -32,8 +32,8 @@ Note: 修改对应位置
 import gymnasium as gym
 from gymnasium.utils import seeding
 
-from powergym.powergym.circuit import Circuits, BatteryController, load_ev_from_csv, BatteryStationManager
-from powergym.powergym.loadprofile import LoadProfile
+from dssgym.dssgym.circuit import Circuits, BatteryController, load_ev_from_csv, BatteryStationManager
+from dssgym.dssgym.loadprofile import LoadProfile
 import networkx as nx
 
 import os

@@ -39,9 +39,9 @@ import pandas as pd
 from pathlib import Path
 from collections import deque
 
-# from powergym.powergym.ev_bms import EVBMS
+# from dssgym.dssgym.ev_bms import EVBMS
 # 替换为更新的 ev_bms
-from powergym.powergym.ev_bms_v01 import EVBMS
+from dssgym.dssgym.ev_bms_v01 import EVBMS
 
 class Circuits:
     """Circuits 类：电力系统的核心管理类

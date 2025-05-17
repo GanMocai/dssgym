@@ -87,7 +87,7 @@ def main():
     parser = argparse.ArgumentParser(description="根据CSV数据绘制奖励曲线")
     parser.add_argument("mode", choices=["train", "test"], help="选择绘制训练或测试奖励曲线")
     parser.add_argument("csv_path",
-                        help="奖励数据CSV文件的路径，例如：D:\\LENOVO\\Documents\\Python\\ML\\powergym\\results_20250503_165005_13Bus_1000000\\rewards_in_training.csv")
+                        help="奖励数据CSV文件的路径，例如：D:\\LENOVO\\Documents\\Python\\ML\\dssgym\\results_20250503_165005_13Bus_1000000\\rewards_in_training.csv")
     args = parser.parse_args()
 
     if args.mode == "train":
@@ -99,14 +99,14 @@ def main():
 if __name__ == "__main__":
     # main()
     path = ['0']
-    # path_1 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250501_021615_13Bus_cbat_1000000_01\rewards_in_training.csv'
-    # path_2 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250502_005245_13Bus_cbat_s2_1000000_02\rewards_in_training.csv'
-    # path_3 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250502_125646_13Bus_1000000_03\rewards_in_training.csv'
-    # path_4 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250503_091058_13Bus_cbat_1000000_04\rewards_in_training.csv'
-    # path_5 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250503_124337_13Bus_cbat_s2_1000000_05\rewards_in_training.csv'
-    # path_6 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250503_165005_13Bus_1000000_06\rewards_in_training.csv'
-    # path_7 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250504_012306_13Bus_cbat_1000000_07\rewards_in_training.csv'
-    # path_8 = r'D:\LENOVO\Documents\Python\ML\powergym\results_20250504_055308_13Bus_cbat_1000000_08\rewards_in_training.csv'
+    # path_1 = r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250501_021615_13Bus_cbat_1000000_01\rewards_in_training.csv'
+    # path_2 = r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250502_005245_13Bus_cbat_s2_1000000_02\rewards_in_training.csv'
+    # path_3 = r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250502_125646_13Bus_1000000_03\rewards_in_training.csv'
+    # path_4 = r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250503_091058_13Bus_cbat_1000000_04\rewards_in_training.csv'
+    # path_5 = r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250503_124337_13Bus_cbat_s2_1000000_05\rewards_in_training.csv'
+    # path_6 = r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250503_165005_13Bus_1000000_06\rewards_in_training.csv'
+    # path_7 = r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250504_012306_13Bus_cbat_1000000_07\rewards_in_training.csv'
+    # path_8 = r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250504_055308_13Bus_cbat_1000000_08\rewards_in_training.csv'
     # path.append(path_1)
     # path.append(path_2)
     # path.append(path_3)

@@ -7,13 +7,13 @@
 """
 用SB3的PPO算法作为智能体进行训练，主程序
 note: 统一设置各种随机seed为27
-note: 在原始代码执行过程中，保存模型时，未使用cwd则会保存到对应dss文件所在目录；保存图片在powergym文件夹下的plots目录中
+note: 在原始代码执行过程中，保存模型时，未使用cwd则会保存到对应dss文件所在目录；保存图片在dssgym文件夹下的plots目录中
 note: 自定义网络参数的方式可见 https://kimi.moonshot.cn/chat/cv8ol6kchmtsrgk9q630
 曾使用monkey patch临时替换函数reset，参考自 https://yuanbao.tencent.com/chat/naQivTmsDa/26ca9f85-b738-4e39-8d3d-7550578fdb25
 """
 
 from stable_baselines3 import PPO
-from powergym.powergym.env_register import make_env, remove_parallel_dss
+from dssgym.dssgym.env_register import make_env, remove_parallel_dss
 from RL.SB3.reward_monitor_callback import RewardMonitorCallback
 
 import matplotlib.pyplot as plt
@@ -30,7 +30,7 @@ import multiprocessing as mp
 import datetime
 import time
 
-from powergym.end_projection import CustomActionWrapper
+from dssgym.end_projection import CustomActionWrapper
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Argument Parser')
@@ -490,7 +490,7 @@ def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, pri
         print_step: 是否打印每步信息
     """
     cwd = os.getcwd()
-    print('当前工作目录:', cwd)  # 默认运行时工作目录在powergym
+    # print('当前工作目录:', cwd)  # 默认运行时工作目录不符合预期
 
     # 创建以时间戳和环境名命名的文件夹
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
