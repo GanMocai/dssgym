@@ -11,7 +11,7 @@
 - charger_num 10
 - charger_kW \[120\] * 10
 - transformer_kVA': 800
-- EV_demand `D:\LENOVO\Documents\Python\ML\powergym\ev_demand\ev_demand-public_parking-general-250-A95.csv`
+- EV_demand `D:\LENOVO\Documents\Python\ML\dssgym\ev_demand\ev_demand-public_parking-general-250-A95.csv`
 - EV_PF -0.98
 - kWh round 2
 
@@ -19,7 +19,7 @@
 ```dss
 !PV Shape
 New Loadshape.PV_Daily npts=96 interval=0.25
-~ mult=(File=D:\LENOVO\Documents\Python\ML\powergym\systems\1-day-900-s-Solar-2-Average-Pad-06.csv)
+~ mult=(File=D:\LENOVO\Documents\Python\ML\dssgym\systems\1-day-900-s-Solar-2-Average-Pad-06.csv)
 ~ Action=Normalize
 
 !ADD PV DEFINITIONS. Initialize with 0 kw. Checked by o3-mini
@@ -36,8 +36,8 @@ batt1,100,0.95,200,40
 
 ## Path
 
-- model_path `D:\LENOVO\Documents\Python\ML\powergym\results_20250511_121502_13Bus_cbat_s2_1000000\model\ppo_model.zip`
-- 测试命令参数 `--model_path D:\LENOVO\Documents\Python\ML\powergym\results_20250511_121502_13Bus_cbat_s2_1000000\model\ppo_model.zip --env_name 13Bus_cbat --test_only true`
+- model_path `D:\LENOVO\Documents\Python\ML\dssgym\results\results_20250511_121502_13Bus_cbat_s2_1000000\model\ppo_model.zip`
+- 测试命令参数 `--model_path D:\LENOVO\Documents\Python\ML\dssgym\results\results_20250511_121502_13Bus_cbat_s2_1000000\model\ppo_model.zip --env_name 13Bus_cbat --test_only true`
   - 额外操作，在circuit中调整BMS和功率基值设置。
 
 ## Train Info
@@ -77,7 +77,7 @@ batt1,100,0.95,200,40
   平均奖励: 1539.0047
   奖励标准差: 2477.4346
 警告: 检测到非常大的奖励值(>1000)，这可能导致训练不稳定。建议考虑奖励缩放。
-奖励数据已成功导出到: D:\LENOVO\Documents\Python\ML\powergym\results_20250511_173442_13Bus_cbat_1000000\rewards_in_training.csv
-模型已保存至 D:\LENOVO\Documents\Python\ML\powergym\results_20250511_173442_13Bus_cbat_1000000\model\ppo_model
-奖励函数权重已保存至 D:\LENOVO\Documents\Python\ML\powergym\results_20250511_173442_13Bus_cbat_1000000\reward_weights.csv.
+奖励数据已成功导出到: D:\LENOVO\Documents\Python\ML\dssgym\results\results_20250511_173442_13Bus_cbat_1000000\rewards_in_training.csv
+模型已保存至 D:\LENOVO\Documents\Python\ML\dssgym\results\results_20250511_173442_13Bus_cbat_1000000\model\ppo_model
+奖励函数权重已保存至 D:\LENOVO\Documents\Python\ML\dssgym\results\results_20250511_173442_13Bus_cbat_1000000\reward_weights.csv.
 ```

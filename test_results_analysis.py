@@ -766,7 +766,7 @@ def test_results_analysis(results_dir, index=0):
         storage_data = load_storage_data(storage_file)
     
     # 读取光伏数据
-    pv_file = os.path.join(r'/dssgym\systems',
+    pv_file = os.path.join(r'\dssgym\systems',
                            '1-day-900-s-Solar-2-Average-Pad-06.csv')
     pv_data = None
     if os.path.exists(pv_file):
@@ -810,43 +810,43 @@ def test_results_analysis(results_dir, index=0):
 
 # 示例用法
 if __name__ == "__main__":
-    # 旧测试结果
+    # 第一轮测试结果，历史路径，已经更改，如需重新测试需要调整
     # path_list = [
-    #     r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250501_021615_13Bus_cbat_1000000_01\test_results_20250501_073028',
-    #     r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250502_005245_13Bus_cbat_s2_1000000_02\test_results_20250502_065405',
-    #     r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250502_125646_13Bus_1000000_03\test_results_20250502_214808',
-    #     r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250503_091058_13Bus_cbat_1000000_04\test_results_20250503_123842',
-    #     r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250503_124337_13Bus_cbat_s2_1000000_05\test_results_20250503_164645',
-    #     r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250503_165005_13Bus_1000000_06\test_results_20250504_011214',
-    #     r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250504_012306_13Bus_cbat_1000000_07\test_results_20250504_052230',
-    #     r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250504_055308_13Bus_cbat_1000000_08\test_results_20250504_093552',
+    #     r'D:\LENOVO\Documents\Python\ML\dssgym\results\results_20250501_021615_13Bus_cbat_1000000_01\test_results_20250501_073028',
+    #     r'D:\LENOVO\Documents\Python\ML\dssgym\results\results_20250502_005245_13Bus_cbat_s2_1000000_02\test_results_20250502_065405',
+    #     r'D:\LENOVO\Documents\Python\ML\dssgym\results\results_20250502_125646_13Bus_1000000_03\test_results_20250502_214808',
+    #     r'D:\LENOVO\Documents\Python\ML\dssgym\results\results_20250503_091058_13Bus_cbat_1000000_04\test_results_20250503_123842',
+    #     r'D:\LENOVO\Documents\Python\ML\dssgym\results\results_20250503_124337_13Bus_cbat_s2_1000000_05\test_results_20250503_164645',
+    #     r'D:\LENOVO\Documents\Python\ML\dssgym\results\results_20250503_165005_13Bus_1000000_06\test_results_20250504_011214',
+    #     r'D:\LENOVO\Documents\Python\ML\dssgym\results\results_20250504_012306_13Bus_cbat_1000000_07\test_results_20250504_052230',
+    #     r'D:\LENOVO\Documents\Python\ML\dssgym\results\results_20250504_055308_13Bus_cbat_1000000_08\test_results_20250504_093552',
     # ]
-    # rules_agent_path = r'D:\LENOVO\Documents\Python\ML\dssgym\test_results_rules_20250506_200736_13Bus_cbat'
+    # rules_agent_path = r'D:\LENOVO\Documents\Python\ML\dssgym\results\test_results_rules_20250506_200736_13Bus_cbat'
 
     # 演示结果路径
     demo_path_list = [
-        r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250511_002004_13Bus_1000000\test_results_20250511_021621',  # 提供最大功率容量，启用BMS -2 演示2
-        r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250512_215620_13Bus_1000000\test_results_20250513_001904',  # 按电池最大充电功率，不启用BMS -1 演示1
+        r'D:\LENOVO\Documents\Python\ML\dssgym\results\results_20250511_002004_13Bus_1000000\test_results_20250511_021621',  # 提供最大功率容量，启用BMS -2 演示2
+        r'D:\LENOVO\Documents\Python\ML\dssgym\results\results_20250512_215620_13Bus_1000000\test_results_20250513_001904',  # 按电池最大充电功率，不启用BMS -1 演示1
     ]
     for i in range(len(demo_path_list)):
         test_results_analysis(demo_path_list[i], i-2)
 
     # ppo_agent测试结果路径
     path_list = [
-        r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250509_213723_13Bus_cbat_1000000\test_results_20250510_115601',
-        r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250510_132849_13Bus_cbat_1000000\test_results_20250510_182929',
-        r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250510_194947_13Bus_cbat_1000000\test_results_20250511_001130',
-        r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250513_224309_13Bus_1000000\test_results_20250514_073953',
-        r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250511_121502_13Bus_cbat_s2_1000000\test_results_20250511_172037',
-        r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250512_143129_13Bus_cbat_1000000\test_results_20250512_215128',
-        r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250514_092650_13Bus_1000000\test_results_20250514_183833',
-        r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250513_002728_13Bus_cbat_s2_1000000\test_results_20250513_041136',
+        r'D:\LENOVO\Documents\Python\ML\dssgym\results\results_20250509_213723_13Bus_cbat_1000000\test_results_20250510_115601',
+        r'D:\LENOVO\Documents\Python\ML\dssgym\results\results_20250510_132849_13Bus_cbat_1000000\test_results_20250510_182929',
+        r'D:\LENOVO\Documents\Python\ML\dssgym\results\results_20250510_194947_13Bus_cbat_1000000\test_results_20250511_001130',
+        r'D:\LENOVO\Documents\Python\ML\dssgym\results\results_20250513_224309_13Bus_1000000\test_results_20250514_073953',
+        r'D:\LENOVO\Documents\Python\ML\dssgym\results\results_20250511_121502_13Bus_cbat_s2_1000000\test_results_20250511_172037',
+        r'D:\LENOVO\Documents\Python\ML\dssgym\results\results_20250512_143129_13Bus_cbat_1000000\test_results_20250512_215128',
+        r'D:\LENOVO\Documents\Python\ML\dssgym\results\results_20250514_092650_13Bus_1000000\test_results_20250514_183833',
+        r'D:\LENOVO\Documents\Python\ML\dssgym\results\results_20250513_002728_13Bus_cbat_s2_1000000\test_results_20250513_041136',
     ]
     for i in range(len(path_list)):
         test_results_analysis(path_list[i], i+1)
 
     # rules_agent测试结果路径
-    rules_agent_path = r'/dssgym\test_results_rules_20250513_152400_13Bus_cbat'
+    rules_agent_path = r'\dssgym\results\test_results_rules_20250513_152400_13Bus_cbat'
     test_results_analysis(rules_agent_path, 0)
 
     pass

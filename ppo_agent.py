@@ -495,7 +495,7 @@ def run_ppo_agent(args, load_profile_idx=0, worker_idx=None, use_plot=False, pri
     # 创建以时间戳和环境名命名的文件夹
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     save_dir = f"results_{timestamp}_{args.env_name}_{args.num_steps}"
-    save_path = os.path.join(cwd, save_dir)
+    save_path = os.path.join(cwd, 'results', save_dir)
     if not os.path.exists(save_path):
         os.makedirs(save_path)
 
@@ -723,10 +723,6 @@ def run_dss_agent(args):
               f"episode steps: {episode_steps}, reward: {episode_reward:.2f}")
         if total_num_steps >= args.num_steps:
             break
-
-
-# %% EV数据从文件中读取
-pass
 
 
 if __name__ == '__main__':
