@@ -153,7 +153,7 @@ class Circuits:
 
                     if full_name in self.batteries:
                         batt = self.batteries[full_name]
-                        kw = batt.state_projection(nkws_or_states[idx_in_nkws_or_states]), self.ev_station.charger_kW[charger_id]  # 提供kW容量作为基值: , self.ev_station.charger_kW[charger_id]
+                        kw = batt.state_projection(nkws_or_states[idx_in_nkws_or_states], self.ev_station.charger_kW[charger_id])  # 提供kW容量作为基值: , self.ev_station.charger_kW[charger_id]
                         if hasattr(self.ev_controller, 'bms_instances') and full_name in self.ev_controller.bms_instances:
                             bms = self.ev_controller.bms_instances[full_name]
                             kw = -bms.calculate_charge_power(-kw)  # 时刻注意符号变换，关闭EVBMS: , enable_power_demand=False
