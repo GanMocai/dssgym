@@ -1,12 +1,14 @@
 # -*- coding = utf-8 -*-
 # @Time : 2025/5/8 22:04
 # @Author : Gan Mocai
-# @FIle : new_ev_bms.py
+# @FIle : ev_bms_01.py
 # @Software : PyCharm
 
 """
-更新的EVBMS，为与旧EVBMS共存以便过渡，创建此文件。
-Improve: https://claudeonline.top/chat/d2edca13-d2aa-4d5b-8f92-77f7eefcea30
+更新的EVBMS，与旧EVBMS共存。
+Note:
+    和v00存在同样问题，实际不仅返回需求值给充电桩，也模拟了充电桩的输出行为（假设充电桩会尽量返回容量内的需求值）。
+Improve:
     1. 改进了计算逻辑：
         先根据电池的最大支持功率、协议类型和SOC计算出EV的功率需求值；
         然后将这个功率需求值与充电桩提供的功率做比较，取较小值作为返回值。
@@ -15,8 +17,32 @@ Improve: https://claudeonline.top/chat/d2edca13-d2aa-4d5b-8f92-77f7eefcea30
         当不启用时，直接返回充电桩的功率值而不进行需求计算。
 """
 
+#%% 导入区
 from typing import List, Dict, Any, Optional, Union, Tuple
 
+#%% 预设区
+
+"""
+下面是禁用print的代码，根据Claude3.7，其作用范围：
+    1. 该文件不会影响重定义之前执行的print代码【当函数被定义时，Python不会立即确定函数内的print指向哪个对象，而是在函数被调用执行时才解析print的引用。即使函数定义在print重定义之前，只要函数调用在重定义之后，该函数内的print就会使用重定义后的版本。】
+    2. 其他文件导入了这个模块但没有显式导入 print 函数，其他文件中的 print 调用不会受到影响
+    3. 如果其他文件使用 from ev_bms_v01 import *，可能会导入重定义的 print 函数
+
+当主程序导入EVBMS后：
+    1. 主程序中的print调用不会被禁用，仍会正常输出
+    2. 但是EVBMS类内部的所有print调用会被禁用，因为：
+        2.1 类定义时已在模块作用域内重定义了print
+        2.2 类方法调用时会使用模块作用域内的print定义
+        2.3 即使是在主程序中实例化的EVBMS对象，其方法内的print也会被禁用
+"""
+
+# 保存原始print函数
+original_print = print
+# 重定义为无操作函数
+print = lambda *args, **kwargs: None
+
+
+#%% 正文区
 
 class EVBMS:
     """
@@ -71,6 +97,7 @@ class EVBMS:
     def start_charging(self, charger_power: float) -> float:
         """
         开始充电
+        Note: 这里可能会重新设置charger_power
 
         参数:
             charger_power: 充电桩提供的最大功率(kW)
@@ -84,6 +111,8 @@ class EVBMS:
 
         self.is_charging = True
         self.charging_duration = 0
+        if self.charger_power is None:
+            self.update_charger_power(charger_power)
 
         # 计算初始充电功率
         power = self.calculate_charge_power(charger_power)
@@ -243,7 +272,29 @@ class EVBMS:
         # 限制最小充电功率为1kW
         return max(1.0, power_demand)
 
-    def calculate_charge_power(self, charger_power: float, enable_power_demand:bool=None) -> float:
+    def update_charger_power(self, charger_power: float) -> float:
+        """
+        接收并更新充电桩功率
+        
+        参数:
+            charger_power: 充电桩提供的功率容量(kW)
+            
+        返回:
+            更新后的充电桩功率(kW)
+        """
+        if self.charger_power is None:
+            self.charger_power = charger_power
+            print(f"设置{self.charger_power=}成功。")
+        elif self.charger_power <= 10:  # BMS charger_power <= 10 可重设
+            print(f"历史设置{self.charger_power=}已更新为{charger_power}。")
+            self.charger_power = charger_power
+        else:
+            print(f'历史设置{self.charger_power=}，无法更新为{charger_power=}。')
+            charger_power = self.charger_power
+        
+        return charger_power
+
+    def calculate_charge_power(self, charger_power:float=None, enable_power_demand:bool=None) -> float:
         """
         计算合适的充电功率，并允许在此处更新是否实际启用BMS计算。
 
@@ -264,17 +315,10 @@ class EVBMS:
             print(f"功率需求已禁用，直接使用桩侧设置功率: {charger_power:.2f} kW。")
             return charger_power
 
-        if self.charger_power is None:
-            self.charger_power = charger_power
-            print(f"初次设置{charger_power=}。")
-        elif self.charger_power <= 10:  # BMS charger_power <= 10 可重设
-            print(f"{self.charger_power=} 改为 {charger_power}。")
-            self.charger_power = charger_power
-        else:
-            print(f'已有历史设置{self.charger_power=}，设置{charger_power=}失败。')
-            charger_power = self.charger_power
+        # 更新充电桩功率
+        if charger_power is not None:
+            charger_power = self.update_charger_power(charger_power)
 
-        # 启用功率需求计算
         # 计算EV的功率需求值
         self.power_demand = self.calculate_power_demand()
 

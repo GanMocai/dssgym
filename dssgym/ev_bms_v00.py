@@ -1,13 +1,17 @@
 # -*- coding = utf-8 -*-
 # @Time : 2025/4/27 00:36
 # @Author : Gan Mocai
-# @FIle : ev_bms.py
+# @FIle : ev_bms_v00.py
 # @Software : PyCharm
 
 """
-模拟EV的BMS，根据电池的SOC，最大功率（和温度）与充电桩所给的容量设置功率。灵感源自调研反馈与宇航设想。
-不依赖于已有的其他模块，所以单独搞一个文件。
-https://claudeonline.top/chat/a08557ae-6984-4343-a7cf-4d948ce4c531
+模拟EV的BMS，根据电池的SOC，最大功率（和温度）与充电桩所给的容量设置功率。灵感源自调研与宇航。
+不依赖于其他模块，所以独立一个文件。
+核心逻辑：
+    根据充电桩提供的档位和电池SOC（以及其他信息）返回一个实际充电有功功率
+Note:
+    1. 实际不仅返回需求值给充电桩，也模拟了充电桩的输出行为（假设充电桩会尽量返回容量内的需求值）
+    2. v00的实现中，功率需求值必定在充电桩提供的容量范围内，因为其功率需求值是选择容量和最大功率的较小值作为额定功率
 """
 
 from typing import List, Dict, Any, Optional, Union, Tuple
@@ -178,8 +182,6 @@ class EVBMS:
         elif self.charger_power <= 10:  # BMS charger_power <= 10 可重设
             print(f"{self.charger_power=} 改为 {charger_power}.")
             self.charger_power = charger_power
-        # elif self.charger_power <= charger_power:
-        #     self.charger_power = charger_power
         else:
             print(f'已有历史设置{self.charger_power=}，设置{charger_power=}失败.')
             charger_power = self.charger_power
