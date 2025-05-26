@@ -544,7 +544,7 @@ def test_rules_agent(output_dir=None, args=None, load_profile_idx=0,
     # 导出充电站调度表
     try:
         env.ev_station.export_schedule(output_path=os.path.join(save_path, "schedule.csv"))
-        env.ev_station.export_storage(output_path=os.path.join(save_path, "storage_schedule.csv"))
+        env.ev_station.export_storage_statuses(output_path=os.path.join(save_path, "storage_schedule.csv"))
     except Exception as e:
         print(f"导出充电站调度表失败: {e}。")
 

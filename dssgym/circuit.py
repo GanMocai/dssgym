@@ -3,22 +3,14 @@
 # SPDX-License-Identifier: MIT
 
 """
-Todo:
-    1. PV参考解博的实现，添加进去
-
-Improve:
-    1. 修改时间步长
-    2. 绕开csv设置电池（使用circuit已有add_batteries），添加EV电池的接入和断开操作（参考EVChargingStaion）
-    3. 各类适配
-
 在python中定义各种元器件的特性，使用 OpenDSS 进行电力系统仿真。
 
 Circuits 类：整个电力网络的核心管理类
-    管理电力网络组件（线路、变压器、调节器等）
-    编译和重置电路状态
-    控制电容器、调节器和电池等设备的状态
-    计算电压、电流和损耗等指标
-    添加电力系统组件
+    管理网络组件（线路、变压器、调节器等）
+    编译电路、重置电路
+    控制电容器、调节器和电池等节点组件
+    计算母线电压、边缘电流、功率和损耗等
+    添加边缘和节点组件
 边缘组件：
     Edge：连接两个母线的基类
     Line：电力线路，具有电阻、电抗和电容矩阵
@@ -27,9 +19,22 @@ Circuits 类：整个电力网络的核心管理类
 节点组件：
     Node：连接到母线的基类
     Load：负载节点，具有电压、有功和无功功率属性
-    Capacitor：可控电容器组，具有开关状态
-    Battery：电池设备，具有充放电控制功能 Note: 电池分为储能电池和EV电池
+    Capacitor：可控电容器组，可被控制开/关状态
+    Battery：电池(储能电池和EV电池)，可被控制充放电
+
+Improve:
+    1. 修改时间步长——可以进一步调整时间步长
+    2. 绕开csv设置电池（使用Circuits的add_batteries），添加EV电池的接入和断开控制器（参考此前从0实现的EVChargingStaion）
+    3. 添加充电站运营统计、搭配车辆BMS
+    4. 各类适配
+
+Note:
+    1. 和dss交互有两种风格:
+        使用 dss.Text.Command = "" 是西门子工程师的用法
+        使用 dss.Text.Commands("") 是我选择的类似于opendssdirect.py推荐用法的用法
 """
+
+import logging
 
 import dss as opendss
 import networkx as nx
@@ -39,8 +44,7 @@ import pandas as pd
 from pathlib import Path
 from collections import deque
 
-# from dssgym.dssgym.ev_bms import EVBMS
-# 替换为更新的 ev_bms
+# from dssgym.dssgym.ev_bms_v00 import EVBMS  # 充电需求可能受提供容量的影响（基值取支持功率和容量的较小值）
 from dssgym.dssgym.ev_bms_v01 import EVBMS
 
 class Circuits:
@@ -79,9 +83,9 @@ class Circuits:
         self.loads = dict()
         self.capacitors = dict()
         self.batteries = dict()   # 存储所有电池
-        # 添加以示区分
+        # 区分储能电池和EV电池
         self.storage_batteries = dict()  # storage batteries
-        self.ev_batteries = dict()  # EV batteries
+        self.ev_batteries = dict()  # EV batteries Fixme: 未实际使用
 
         # regulator and battery action dim
         self.reg_act_num, self.bat_act_num = RB_act_num
@@ -90,59 +94,62 @@ class Circuits:
         self.initialize()  # 初始化过程使用 _gen_bat_obj 从csv文件添加
         self.storage_batteries.update(self.batteries)  # 对初始电池字典进行浅拷贝
 
-        # 添加对EV充电站的可引用性
-        self.ev_controller = None
+        # 添加对电池控制器以及EV充电站的可引用性
+        self.battery_controller = None
         self.ev_station = None
 
-    def set_all_batteries_before_solve(self, nkws_or_states, change_dss=True):
+    def set_all_batteries_before_solve(self, agent_battery_actions:list, change_dss:bool=True)->None:
         """
-        设置所有电池（包括储能电池和EV电池）的状态
+        根据动作设置所有电池（包括储能电池和EV电池）的功率
         ( Run this function before each solve() )
         Args:
-            nkws_or_states: array of nkws or states
-                 nkw: continuous battery's normalized discharge power in [-1, 1]
-                 state: discrete battery's discharge state in [0, len(avail_kw)-1]
-            change_dss: 是否在dss中修改电池的kw和kvar
-        Returns:
-            the absolute change of states in integers
+            agent_battery_actions (numpy.ndarray): 一个包含智能体为各电池提供的动作值的数组
+                每个动作值的具体含义取决于对应电池的动作空间类型：
+                - 对于连续动作空间：值通常为浮点数，代表归一化的充放电功率
+                  例如，在 [-1.0, 1.0] 区间内，正值可能表示放电，负值表示充电
+                  （具体约定参考系统对“归一化千瓦”的定义）
+                - 对于离散动作空间：值为整数，作为预定义操作状态的索引
+                  例如，从 0 到 N-1 的整数，其中 N 是可用状态的数量（可能由
+                  `len(avail_kw)` 等定义）
+            change_dss (bool): 是否将计算得到的 kw 和 kvar 更改应用到 DSS 模型中
         """
-        # 原校验过程
-        # assert len(nkws_or_states) > 0 and len(nkws_or_states) == len(self.batteries), 'inconsistent states'
+        # 原校验，和充电站有冲突
+        # assert len(agent_battery_actions) > 0 and len(agent_battery_actions) == len(self.batteries), 'inconsistent states'
 
-        # 将智能体的输出转换为合法的电池功率控制
+        # 将智能体的对电池的动作转换为合规的功率控制动作向量
         if self.bat_act_num == np.inf:  # 连续空间
-            nkws_or_states = np.array(nkws_or_states, dtype=np.float32)
+            agent_battery_actions = np.array(agent_battery_actions, dtype=np.float32)
         else:
-            nkws_or_states = np.array(nkws_or_states, dtype=int)
+            agent_battery_actions = np.array(agent_battery_actions, dtype=int)
 
-        # 为适配场景（EV连接点未满），添加额外处理
+        # 为适配场景（存在空闲充电桩）额外处理
         # 初始化电池功率字典
         bat2kwkvar = dict()
         # 1. 先处理静态储能电池
-        for i, bat_name in enumerate(self.storage_batteries.keys()):
+        for storage_idx, bat_name in enumerate(self.storage_batteries.keys()):
             if bat_name in self.batteries:  # 确保电池存在
                 batt = self.batteries[bat_name]
-                kw = batt.state_projection(nkws_or_states[i])  # projection
+                kw = batt.state_projection(agent_battery_actions[storage_idx])  # projection
                 kvar = kw * np.tan(np.arccos(batt.pf))
                 bat2kwkvar[batt.name[8:]] = (kw, kvar)  # remove the header 'Battery.'
 
         # 2. 处理EV电池
         if hasattr(self, 'ev_station') and self.ev_station is not None:
-            static_battery_count = len(self.storage_batteries)
+            storage_battery_count = len(self.storage_batteries)
 
             # 遍历所有EV连接点位置
-            for j in range(self.ev_station.num_connection_points):
-                idx_in_nkws_or_states = static_battery_count + j
+            for connection_idx in range(self.ev_station.num_connection_points):
+                battery_action_idx = storage_battery_count + connection_idx
 
                 # 跳过超出动作空间的部分
-                if idx_in_nkws_or_states >= len(nkws_or_states):
+                if battery_action_idx >= len(agent_battery_actions):
                     continue
 
                 # 查找连接到此连接点的EV
                 ev_idx = None
                 charger_id = None
                 for battery_idx, connection_id in self.ev_station.battery_connection_points.items():
-                    if connection_id == j and battery_idx in self.ev_station.connected_batteries:
+                    if connection_id == connection_idx and battery_idx in self.ev_station.connected_batteries:
                         ev_idx = battery_idx
                         charger_id = connection_id
                         break
@@ -153,33 +160,27 @@ class Circuits:
 
                     if full_name in self.batteries:
                         batt = self.batteries[full_name]
-                        kw = batt.state_projection(nkws_or_states[idx_in_nkws_or_states], self.ev_station.charger_kW[charger_id])  # 提供kW容量作为基值: , self.ev_station.charger_kW[charger_id]
-                        if hasattr(self.ev_controller, 'bms_instances') and full_name in self.ev_controller.bms_instances:
-                            bms = self.ev_controller.bms_instances[full_name]
-                            kw = -bms.calculate_charge_power(-kw)  # 时刻注意符号变换，关闭EVBMS: , enable_power_demand=False
+                        kw = batt.state_projection(agent_battery_actions[battery_action_idx], self.ev_station.charger_kW[charger_id])  # 提供kW容量作为基值: , self.ev_station.charger_kW[charger_id]
+                        if hasattr(self.battery_controller, 'bms_instances') and full_name in self.battery_controller.bms_instances:
+                            bms = self.battery_controller.bms_instances[full_name]
+                            kw = -bms.calculate_charge_power(-kw)  # BMS是按充电功率计算的，关闭EVBMS: , enable_power_demand=False
                         kvar = kw * np.tan(np.arccos(batt.pf))
                         bat2kwkvar[batt.name[8:]] = (kw, kvar)
 
-        # # 原设置电池对象——使用功率因数进行计算的方式有问题，把AI带歪了
-        # bat2kwkvar = dict()
-        # for i, bat in enumerate(self.batteries.keys()):  # 索引，key
-        #     batt = self.batteries[bat]
-        #     kw = batt.state_projection(nkws_or_states[i])  # projection
-        #     kvar = kw / batt.pf
-        #     bat2kwkvar[batt.name[8:]] = (kw, kvar)  # remove the header 'Battery.'
-
-        # 在dss中修改kw和kvar，遍历顺序接近创建顺序，但似乎无明确定义
+        # 在 DSS 中修改 kW 和 kVar [遍历顺序接近创建顺序，但未找到明确定义]
         if change_dss:
             dssGen = self.dss.ActiveCircuit.Generators
             if dssGen.First == 0:  # 没有这类对象
+                logging.warning("No dssGen Object.")
                 return
             while True:
                 if dssGen.Name in bat2kwkvar:
                     kw, kvar = bat2kwkvar[dssGen.Name]
                     dssGen.kW = kw
                     dssGen.kvar = kvar
-                    print(f'已在 set_all_batteries_before_solve 中设置 {dssGen.Name} 充电的有无功功率为 {-dssGen.kW}, {-dssGen.kvar}')
-                if dssGen.Next == 0:  # 没有下一个这类对象
+                    logging.info(f"已在 set_all_batteries_before_solve 中设置 {dssGen.Name} charging kW={-dssGen.kW} with kVar={-dssGen.kvar}")
+                if dssGen.Next == 0:  # 遍历结束，没有下一个这类对象
+                    logging.info("set_all_batteries_before_solve completed.")
                     break
 
         # run solve() afterward
@@ -192,8 +193,8 @@ class Circuits:
         Args: None
         Returns: soc 变化 和 discharge 变化
         """
-        # 为适配场景（EV连接点未满），添加额外处理
-        # 使用storage_batteries获取初始化时存储的静态电池
+        # 为适配场景（存在空闲充电桩）额外处理
+        # 使用storage_batteries获取初始化时存储的储能电池
         total_actions = len(self.storage_batteries)
 
         if hasattr(self, 'ev_station') and self.ev_station is not None:
@@ -203,7 +204,7 @@ class Circuits:
         soc_errs = np.zeros(total_actions)
         discharge_errs = np.zeros(total_actions)
 
-        # 1. 更新静态储能电池err状态并记录变化
+        # 1. 更新储能电池状态并记录变化err
         for i, bat_name in enumerate(self.storage_batteries.keys()):
             if bat_name in self.batteries:  # 确保电池存在
                 batt = self.batteries[bat_name]
@@ -217,13 +218,13 @@ class Circuits:
                 else:
                     discharge_errs[i] = max(0.0, batt.avail_kw[batt.state]) / batt.max_kw
 
-        # 2. 更新EV电池err状态
+        # 2. 更新EV电池状态并记录变化err
         if hasattr(self, 'ev_station') and self.ev_station is not None:
-            static_battery_count = len(self.storage_batteries)
+            storage_battery_count = len(self.storage_batteries)
 
             # 对所有EV连接点位置，无论是否有EV连接，都更新对应位置的状态变化数组
             for j in range(self.ev_station.num_connection_points):
-                idx_in_bat_errs = static_battery_count + j
+                idx_in_bat_errs = storage_battery_count + j
 
                 # 查找连接到此连接点的EV
                 ev_idx = None
@@ -241,8 +242,8 @@ class Circuits:
                         batt.kwh += batt.actual_power() * batt.duration
                         batt.kwh = round(max(0.0, min(batt.max_kwh, batt.kwh)), 2)
                         batt.soc = batt.kwh / batt.max_kwh
-                        if hasattr(self.ev_controller, 'bms_instances') and full_name in self.ev_controller.bms_instances:
-                            bms = self.ev_controller.bms_instances[full_name]
+                        if hasattr(self.battery_controller, 'bms_instances') and full_name in self.battery_controller.bms_instances:
+                            bms = self.battery_controller.bms_instances[full_name]
                             bms.set_soc(batt.soc)  # 及时更新soc
                         soc_errs[idx_in_bat_errs] = abs(batt.soc - batt.initial_soc)
 
@@ -250,7 +251,7 @@ class Circuits:
                             discharge_errs[idx_in_bat_errs] = max(0.0, batt.kw) / batt.max_kw
                         else:
                             discharge_errs[idx_in_bat_errs] = max(0.0, batt.avail_kw[batt.state]) / batt.max_kw
-                # 如果没有EV连接，这个位置的soc_errs和discharge_errs保持为0
+                # 如果没有EV连接，相应位置的soc_errs和discharge_errs保持为0
 
         # 原处理过程
         # soc_errs, discharge_errs = np.zeros(len(self.batteries)), np.zeros(len(self.batteries))
@@ -273,7 +274,7 @@ class Circuits:
         Set all regulator parameters to the same predefined values
 
         Args:
-           tap: tap value in between mintap and maxtap（原默认值1.1，会将tap调到1.1，导致我在初始化文件中做的修改无效）
+           tap: tap value in between mintap and maxtap（原默认值1.1，会将tap调到1.1，导致在dss文件中的定义无效）
            maxtap: max tap value
            mintap: min tap value
 
@@ -836,7 +837,7 @@ class Circuits:
 # %% Edge Objects
 class Edge:
     """
-    定义了电力系统的边界对象，包括变压器、线路和调节器等。其中，边界对象
+    定义了电力系统的边界组件基类。
     """
 
     def __init__(self, name, bus1, bus2):
@@ -850,7 +851,7 @@ class Edge:
 
 class Line(Edge):
     """
-    定义了电力系统的线路对象，包括单相和三相线路。
+    定义了电力系统的线路类，包括单相和三相线路。
     """
 
     def __init__(self, name, buses, mats):
@@ -868,7 +869,7 @@ class Line(Edge):
 
 class Transformer(Edge):
     """
-    定义了电力系统的变压器对象，包括两端或三端变压器。
+    定义了电力系统的变压器类，包括两端或三端变压器。
     """
 
     def __init__(self, name, buses, feature):
@@ -894,7 +895,7 @@ class Transformer(Edge):
 
 class Regulator(Edge):
     """
-    定义了电力系统的调节器对象，包括两端或三端调节器。
+    定义了电力系统的调压器类，包括两端或三端调压器。
     """
 
     def __init__(self, dss, name, buses, feature, tapfea):
@@ -914,12 +915,15 @@ class Regulator(Edge):
 
 # %% Node Objects
 class Node:
+    """
+    定义了电力系统的节点组件的基类。
+    """
     def __init__(self, name, bus1, phases):
         """
         初始化仅赋值属性
         Args:
-            name:
-            bus1:
+            name: 对象名称
+            bus1: 连接的母线名称
             phases: names of the active phases; e.g., ['1','2','3']
         """
         self.name = name
@@ -976,7 +980,7 @@ class Battery(Node):
     """
 
     def __init__(self, dss, batname, bus1, phases, feature, bat_act_num=33):
-        # Todo:这里没考虑效率——一般设置为0.9~0.95
+        # Fixme: 没考虑效率——一般设置为0.9~0.95
         super().__init__(batname, bus1, phases)
         self.dss = dss  # the circuit's dss simulator object
         self.max_kw = feature.max_kw  # maximum power magnitude
@@ -987,7 +991,7 @@ class Battery(Node):
         self.initial_soc = self.soc  # initial soc
         self.duration = self.dss.ActiveCircuit.Solution.StepSize / 3600.0  # time step in hour——一个时间步对应的小时数
         if self.duration < 1e-5: self.duration = 1.0
-        self.enabled = True  # 默认启用 Todo: 添加实际逻辑启用弃用
+        self.enabled = True  # 默认启用 Todo: 添加实际代码逻辑，可通过该属性判断/控制启用弃用
 
         # battery states
         self.bat_act_num = bat_act_num
@@ -1019,8 +1023,8 @@ class Battery(Node):
         Returns:
             the valid discharge kw
         """
-        # Todo: 之前是按照Battery初始化时的额定功率作为基准值，后续将映射处理改为统一基准值，但应该会影响训练收敛，先不动。
-        # Improve: 已改为可另外设置基值，如设为充电桩总容量kW，默认仍为电池最大支持功率（连续和差分都是）
+        # Todo: 之前是将Battery初始化时的额定功率作为基值，后续可将映射处理改为统一基值，但可能会影响训练收敛。
+        # Improve: 已改为可另外设置基值，如设为充电桩总容量kW，默认仍为电池最大支持功率（包括连续和差分）。
         if base_kW is None:
             kW_base = self.max_kw
         else:
@@ -1043,7 +1047,7 @@ class Battery(Node):
                         state = int(state - np.ceil((self.avail_kw[state] - allowed_kw) / \
                                                     (self.avail_kw[1] - self.avail_kw[0]) - 1e-8))
                 elif state < mid:  # charging
-                    allowed_kw = (self.kwh - self.max_kwh) / self.duration  # min kw
+                    allowed_kw = (self.kwh - self.max_kwh) / self.duration  # min kw (max charging kW)
                     if self.avail_kw[state] < allowed_kw:
                         state = int(state + np.ceil((allowed_kw - self.avail_kw[state]) / \
                                                     (self.avail_kw[1] - self.avail_kw[0]) - 1e-8))
@@ -1061,7 +1065,7 @@ class Battery(Node):
                         state = int(state - np.ceil((avail_kw[state] - allowed_kw) / \
                                                     (avail_kw[1] - avail_kw[0]) - 1e-8))
                 elif state < mid:  # charging
-                    allowed_kw = (self.kwh - self.max_kwh) / self.duration  # min kw
+                    allowed_kw = (self.kwh - self.max_kwh) / self.duration  # min kw (max charging kW)
                     if avail_kw[state] < allowed_kw:
                         state = int(state + np.ceil((allowed_kw - avail_kw[state]) / \
                                                     (avail_kw[1] - avail_kw[0]) - 1e-8))
@@ -1086,6 +1090,7 @@ class Battery(Node):
         name = self.name[8:]  # remove the header 'Battery.'
         dssGen = self.dss.ActiveCircuit.Generators
         if dssGen.First == 0:  # no such kind of object
+            logging.warning("No dssGen Object.")
             return
         while True:
             if dssGen.Name == name:
@@ -1106,7 +1111,7 @@ class Battery(Node):
         """
         self.kwh += self.actual_power() * self.duration
         # 实现容量限制并将kwh的值截断为整数
-        self.kwh = round(max(0.0, min(self.max_kwh, self.kwh)))  # Fixme: 可能不需要进行截断，但是截断可能利于训练收敛——不过这里没有实际使用
+        self.kwh = round(max(0.0, min(self.max_kwh, self.kwh)))  # Fixme: 可能不需要进行截断，但是截断可能利于训练收敛——不过该函数尚未被实际调用
         self.soc = self.kwh / self.max_kwh
         soc_err = abs(self.soc - self.initial_soc)
 
@@ -1118,15 +1123,14 @@ class Battery(Node):
         return soc_err, discharge_err
 
     def actual_power(self):
-        # 返回当前电池充电的有功功率，负号代表是放电
+        # 返回电池的充电有功功率，负号表示放电
         # get the actual power computed by dss in [-kw, -kvar] in dss, the minus means power generation
-        # actual_power < 0 means discharging （和 opendss 内置的 storage 相反）
+        # actual_power < 0 means discharging (和 opendss 内置的 storage 相反)
         try:
             name = 'Generator.' + self.name[8:]
             return self.dss.ActiveCircuit.CktElements(name).TotalPowers[0]
         except Exception as e:
-            print(e)
-            print("Not Found!")
+            logging.error(e)
             return 0.0
 
     def reset(self):
@@ -1148,19 +1152,19 @@ class BatteryController:
 
     def __init__(self, circuit):
         """初始化控制器"""
-        self.circuit = circuit  # 引用电力系统Circuits实例
-        self.dss = circuit.dss  # 引用OpenDSS接口
+        self.circuit = circuit  # 引用电力系统Circuit对象
+        self.dss = circuit.dss  # 引用DSS接口
         self.active_batteries = {}  # 当前激活的电池 {name: Battery对象}
         self.battery_configs = {}  # 所有电池配置信息 {name: pd.Series}
         self.battery_history = {}  # 电池运行历史记录
-        self.bms_instances = {}  # EV电池的BMS对象 {name: EV_BMS对象}  可以注释以移除BMS
+        self.bms_instances = {}  # EV电池的BMS对象 {name: EV_BMS对象}  可以直接注释以移除连接电池时的创建BMS操作
 
         # 添加对已有电池的管理
         for bat_name, battery in circuit.batteries.items():
             self.active_batteries[bat_name] = battery
             self.battery_history[bat_name] = []
 
-    def connect_battery(self, name, bus, max_kw=100, max_kwh=100, initial_soc=0.2, pf=-0.98, curve_type:int=0):
+    def connect_battery(self, name, bus, max_kw=100, max_kwh=100, initial_soc:float=0.2, pf:float=-0.98, curve_type:int=0):
         """连接指定的电池或创建新电池，借助 circuit.add_batteries
         Args:
             name (str): 电池名称，或者说电动汽车编号
@@ -1169,7 +1173,7 @@ class BatteryController:
             max_kwh (float): 最大能量（kWh）
             initial_soc (float): 初始SOC（0-1之间）
             pf (float): 功率因数
-            curve_type (int): 曲线类型
+            curve_type (int): BMS偏好的曲线特性类型，默认为0，即多段恒功率
         Returns:
             str: 电池名称
         """
@@ -1177,7 +1181,7 @@ class BatteryController:
         if f"Battery.{name}" in self.active_batteries:
             self.disconnect_battery(name)
 
-        # 创建OpenDSS中的实际对象——电压等级等和dss中创建的储能保持一致
+        # 创建DSS中的实际对象——属性和dss中储能保持一致
         self.dss.Text.Commands(f"""
             New Generator.{name}
             ~ phases=3
@@ -1190,13 +1194,14 @@ class BatteryController:
             ~ enabled=True
         """)
 
-        # 创建Battery配置对象
+        # 创建Battery配置对象，其中创建Battery对象实际使用了max_kw, pf, max_kwh, initial_kwh。
         bat_config = pd.Series({
             'max_kw': max_kw,
             'pf': pf,
+            'curve_type': curve_type,
             'max_kwh': max_kwh,
             'initial_kwh': max_kwh * initial_soc,
-            'initial_soc': initial_soc
+            'initial_soc': initial_soc,
         })
         # 添加到配置列表
         self.battery_configs[name] = bat_config
@@ -1205,7 +1210,7 @@ class BatteryController:
         self.dss.ActiveCircuit.SetActiveBus(bus)
         phases = [str(i) for i in self.dss.ActiveCircuit.Buses.Nodes]
 
-        # 创建Battery对象，OpenDSS的实际对象的对应抽象
+        # 创建Battery对象，OpenDSS的实际对象的对应在python层面的抽象
         bat_name = f"Battery.{name}"
         self.circuit.add_batteries(bat_name, bus, phases, bat_config)
 
@@ -1213,8 +1218,9 @@ class BatteryController:
         self.active_batteries[bat_name] = self.circuit.batteries[bat_name]
         self.battery_history[bat_name] = []
 
+        # 创建BMS实例
         has_bms = ''
-        if hasattr(self, 'bms_instances'):
+        if hasattr(self, 'bms_instances') and self.bms_instances is not None:
             # 创建EVBMS实例并添加到管理列表
             bms = EVBMS(
                 battery_capacity=max_kwh,
@@ -1223,9 +1229,9 @@ class BatteryController:
                 charge_protocol=curve_type  # 使用传入的充电曲线类型
             )
             self.bms_instances[bat_name] = bms
-            has_bms = '，并创BMS'
+            has_bms = "，同时创建BMS"
 
-        print(f"已连接 {name}, 初始SOC: {initial_soc * 100}%, 最大功率: {max_kw}kW, 电池容量: {max_kwh}kWh{has_bms}。")
+        logging.info(f"已连接 {name}, 初始SOC: {initial_soc * 100}%, 最大功率: {max_kw}kW, 电池容量: {max_kwh}kWh{has_bms}")
         return name
 
     def disconnect_battery(self, name):
@@ -1238,7 +1244,7 @@ class BatteryController:
         bat_name = f"Battery.{name}" if not name.startswith("Battery.") else name
 
         if bat_name in self.active_batteries:
-            # 在OpenDSS中禁用
+            # 在DSS中禁用
             gen_name = bat_name[8:]  # 移除"Battery."前缀
             self.dss.Text.Commands(f'Generator.{gen_name}.enabled=False')
 
@@ -1252,10 +1258,10 @@ class BatteryController:
 
             # 从管理列表中移除
             del self.active_batteries[bat_name]
-            print(f"已断开电池: {name}")
+            logging.info(f"已断开电池 {name}")
             return True
         else:
-            print(f"电池 {name} 不存在或已断开")
+            logging.warning(f"电池 {name} 不存在或已断开")
             return False
 
     def set_battery_power(self, name, power_kw):
@@ -1270,7 +1276,7 @@ class BatteryController:
         bat_name = f"Battery.{name}" if not name.startswith("Battery.") else name
 
         if bat_name not in self.active_batteries:
-            print(f"错误，电池 {name} 未连接。")
+            logging.error(f"错误，电池 {name} 未连接")
             return False
 
         battery = self.active_batteries[bat_name]
@@ -1283,7 +1289,7 @@ class BatteryController:
         elif abs(power_kw) > abs(battery.max_kw): # 限制功率在额定范围内
             original_power = power_kw
             power_kw = battery.max_kw if power_kw > 0 else -battery.max_kw
-            print(f"功率设置{original_power}kW超出额定值{battery.max_kw}kW，已调整为{power_kw}kW")
+            logging.warning(f"功率设置{original_power}kW超出额定值{battery.max_kw}kW，已调整为{power_kw}kW")
 
         # 设置功率
         if battery.bat_act_num == np.inf:
@@ -1297,7 +1303,7 @@ class BatteryController:
                               key=lambda i: abs(battery.avail_kw[i] - power_kw))
             battery.step_before_solve(closest_idx)
 
-        print(f"已设置{name}的功率为{power_kw}kW")
+        logging.info(f"已设置{name}的功率为{power_kw}kW")
         return True
 
     def get_battery_status(self, name):
@@ -1394,7 +1400,7 @@ class BatteryController:
             bool: 是否成功导出
         """
         if not self.battery_history:
-            print("没有电池历史数据可以导出")
+            logging.warning("没有电池历史数据可以导出")
             return False
 
         try:
@@ -1417,10 +1423,10 @@ class BatteryController:
             df = pd.DataFrame(data)
             output_file = filename if filename else "battery_history.csv"
             df.to_csv(output_file, index=False)
-            print(f"电池历史数据已导出到 {output_file}")
+            logging.info(f"电池历史数据已导出到 {output_file}")
             return True
         except Exception as e:
-            print(f"导出数据失败: {e}")
+            logging.error(f"导出数据失败: {e}")
             return False
 
 
@@ -1446,10 +1452,9 @@ def load_ev_from_csv(csv_path):
             - capacity: 最大容量列表
             - initial_soc: 初始SOC列表
             - target_soc: 目标SOC列表
+            - curve_type: 充电特性曲线类型列表
     """
     try:
-        import pandas as pd
-
         # 读取CSV文件
         df = pd.read_csv(csv_path)
 
@@ -1469,45 +1474,45 @@ def load_ev_from_csv(csv_path):
             'capacity': df['battery_capacity'].tolist(),
             'initial_soc': [round(x, 2) for x in df['start_soc'].tolist()],
             'target_soc': [round(x, 2) for x in df['end_soc'].tolist()],
-            'type': df['curve_type'].tolist()
+            'curve_type': df['curve_type'].tolist()
         }
 
-        # 添加可选列
+        # 可选列
         if 'battery_name' in df.columns:
             result['battery_names'] = df['battery_name'].tolist()
 
         if 'priority' in df.columns:
             result['priority'] = df['priority'].tolist()
 
-        # 进行数据校验
+        # 校验数据
         for i, (arrival, departure) in enumerate(zip(result['arrival'], result['departure'])):
             if arrival == departure:
-                print(f"警告: 第{i+1}行的到达时间等于离开时间")
+                logging.warning(f"警告: 第{i+1}行的到达时间等于离开时间")
             elif arrival > departure:
-                print(f"警告: 第{i+1}行的到达时间晚于离开时间")
+                logging.warning(f"警告: 第{i+1}行的到达时间晚于离开时间")
 
         for i, soc in enumerate(result['initial_soc']):
             if not 0 <= soc <= 1:
-                print(f"警告: 第{i+1}行的初始SOC值 {soc} 不在有效范围[0,1]内")
+                logging.warning(f"警告: 第{i+1}行的初始SOC值 {soc} 不在有效范围[0,1]内")
 
         for i, soc in enumerate(result['target_soc']):
             if not 0 <= soc <= 1:
-                print(f"警告: 第{i+1}行的目标SOC值 {soc} 不在有效范围[0,1]内")
+                logging.warning(f"警告: 第{i+1}行的目标SOC值 {soc} 不在有效范围[0,1]内")
 
         return result
 
     except Exception as e:
-        print(f"加载EV数据失败: {str(e)}")
+        logging.error(f"加载EV数据失败: {str(e)}")
         return None
 
 
 class BatteryStationManager:
-    """EV电池排队管理器，处理EV电池的接入/断开和排队逻辑
+    """EV电池站管理器，处理EV电池的接入/断开/排队，并提供统计功能。
 
     Attributes:
         circuit (Circuits): 电力系统仿真对象
         controller (BatteryController): 电池控制器实例
-        battery_count (int): 电池总数量
+        battery_count (int): EV电池总数量
         initial_data (dict): 保存初始输入数据的字典
         arrival (list): 每个电池的到达时间步
         departure (list): 每个电池的离开时间步
@@ -1517,25 +1522,26 @@ class BatteryStationManager:
         capacity (list): 每个电池的容量(kWh)
         battery_names (list): 电池名称列表
         bus (str): 充电站连接的母线名称
-        num_connection_points (int): 充电桩数量
+        num_connection_points (int): 充电接入点数量
         waiting_queue (deque): 等待接入的电池队列，每项为(idx, arrival_time)
         connected_batteries (dict): 已在连接中的电池，{idx: battery_name}
         connection_next_avail (list): 各接入点下次可用的时间步
         total_steps (int): 总时间步数
         current_step (int): 当前时间步
-        schedule (np.ndarray): 电池功率排程矩阵，形状为(battery_count, total_steps)
-        storage
+        schedule (np.ndarray): 电池充电功率矩阵，形状为(battery_count, total_steps)
         sorted_indices (np.ndarray): 按到达时间排序的电池索引
-        stats (dict): 性能统计数据，可能还需要包括等待时间、拒绝数量、实时充电满足率等，已经包括实时充电满足率
+        battery_connection_points (dict): 记录当前电池和接入点对应关系，{idx: connection_point_idx}
+        battery_connection_points_history (dict): 记录历史电池和接入点对应关系，{idx: connection_point_idx}
+        stats (dict): 统计数据字典
     """
 
     def __init__(self, circuit, bus, num_connection_points, charger_kW, arrival, departure,
-                 max_power, initial_soc, target_soc, capacity,
+                 max_power, initial_soc, target_soc, capacity, curve_type=None,
                  battery_names=None, total_steps=96, EV_PF=-0.98):
         """
         Args:
             circuit: Circuits对象，电力系统实例
-            bus: 接入点母线名称  （本来想改，但是pycharm重构对于这种大众名比较麻烦）
+            bus: 接入点母线名称  （本来想改，但是pycharm重构对于这种通用名比较麻烦）
             num_connection_points: 电网可用接入点数量
             charger_kW: 接入点提供功率的列表
             arrival: 到达时间步列表
@@ -1544,6 +1550,7 @@ class BatteryStationManager:
             initial_soc: 初始SOC列表(0-1)
             target_soc: 目标SOC列表(0-1)
             capacity: 最大容量列表(kWh)
+            curve_type: 充电特性列表
             battery_names: 电池名称列表，若不提供则自动按照索引生成
             total_steps: 总时间步数，默认96（即24小时每15分钟一个时间步）
         """
@@ -1565,8 +1572,13 @@ class BatteryStationManager:
         else:
             assert len(target_soc) == self.battery_count, "目标SOC列表长度必须一致"
 
+        # 如果没有提供充电特性曲线类型，则默认为多段恒功率，对应0
+        if curve_type is None:
+            curve_type = [0] * self.battery_count
+        else:
+            assert len(curve_type) == self.battery_count, "充电特性类型列表长度必须一致"
+
         # 如果未提供电池名称，则自动生成
-        self.battery_count = len(arrival)
         if battery_names is None:
             battery_names = [f"batt_ev_{i:03d}" for i in range(self.battery_count)]
 
@@ -1578,6 +1590,7 @@ class BatteryStationManager:
             'initial_soc': initial_soc.copy(),
             'target_soc': target_soc.copy(),
             'capacity': capacity.copy(),
+            'curve_type': curve_type.copy(),
             'battery_names': battery_names.copy(),
             'num_connection_points': num_connection_points
         }
@@ -1589,6 +1602,7 @@ class BatteryStationManager:
         self.initial_soc = initial_soc
         self.target_soc = target_soc
         self.capacity = capacity
+        self.curve_type = curve_type
         self.battery_names = battery_names
 
         # 充电站参数
@@ -1599,62 +1613,62 @@ class BatteryStationManager:
         self.waiting_queue = deque()  # 等待队列 (idx, arrival_time)
         self.connected_batteries = {}  # 已连接电池 {idx: battery_name}，当前连接的电池
         self.connection_next_avail = [0] * num_connection_points  # 各接入点下次可用时间
-        # 添加一个新字典来记录当前的电池与连接点的对应关系
-        self.battery_connection_points = {}  # {battery_idx: connection_point_id}，会自动清理
-        self.battery_connection_points_history = {}  # {battery_idx: connection_point_id}，用于记录电池与连接点的对应关系
+        # 添加字典 记录当前的EV电池与虚拟连接点的对应关系
+        self.battery_connection_points = {}  # {battery_idx: connection_point_id} connection_point_id其实是索引 断开后会删除
+        self.battery_connection_points_history = {}  # {battery_idx: connection_point_id} 记录电池与连接点的对应关系 除重置外不删除
 
         # 时间和调度
         self.total_steps = total_steps
         self.current_step = 0
-        self.schedule = np.zeros((self.battery_count, self.total_steps))  # EV电池功率矩阵
-        self.storage_schedule = np.zeros((len(self.circuit.storage_batteries), self.total_steps))
-        self.storage_energy = np.zeros((len(self.circuit.storage_batteries), self.total_steps))
+        self.schedule = np.zeros((self.battery_count, self.total_steps), dtype=np.float32)  # EV电池充电功率矩阵
+        self.storage_schedule = np.zeros((len(self.circuit.storage_batteries), self.total_steps), dtype=np.float32)
+        self.storage_energy = np.zeros((len(self.circuit.storage_batteries), self.total_steps), dtype=np.float32)
 
-        # 确保电池控制器存在  Fixme: 实际最初是想需要将这部分和控制器相互嵌入
-        if circuit.ev_controller is not None:
-            circuit.ev_controller = BatteryController(circuit)
-        self.controller = circuit.ev_controller
+        # 引用电池控制器
+        if circuit.battery_controller is not None:
+            circuit.battery_controller = BatteryController(circuit)
+        self.controller = circuit.battery_controller
 
         # 按到达时间对EV电池进行排序
         self.sorted_indices = np.argsort(arrival)
 
-        # 性能统计
+        # 统计数据
         self.stats = {
-            # 基本连接统计
-            'connected_count': 0,  # 已连接的EV电池数【原计划用于统计已连接过的EV数，在断开时计数】
+            # 连接计数
+            'connected_count': 0,  # 已连接的EV电池数【断开时计数，原计划用于统计已连接过的EV数】 Fixme: 改为接入时计数
             'rejected_count': 0,  # 未能连接的EV电池数
             'waiting_count': 0,  # 进入等待队列的EV电池数
             'active_count': 0,  # 当前连接的EV电池数
 
-            # 能量统计
+            # 能量计量
             'total_discharge': 0,  # 总放电量(kWh)
             'total_charge': 0,  # 总充电量(kWh)
             'net_energy': 0,  # 净能量交换(kWh)——干净获取能量
 
-            # 充电满足度统计
-            'completed_count': 0,  # 完成充电的EV电池数【原计划用于统计满足需求的EV数】
+            # 充电满足程度
+            'completed_count': 0,  # 完成充电的EV电池数（和connected_count一致） Fixme: 原计划用于统计满足需求的EV数，现在的target_achieved_count
             'completed_soc': 0,  # 完成充电的EV电池的SOC增加总和
             'avg_completed_soc': 0,  # 完成充电的EV电池的平均增加的SOC
             'charge_satisfaction_ratio': 0,  # EV电池能量满足率之和（单个EV电池的满足率离开时的充电能量比所需的充电能量）
             'target_achieved_count': 0,  # 达到目标SOC（能量满足率为1，完全满足）的EV电池数
             'avg_target_achieved': 0,  # 充电满足率平均值(满足率之和/总连接数)
 
-            # 服务质量统计
+            # 等待时间（从等待队列中的车辆接入时进行更新，因此尚未统计未被服务）
             'avg_waiting_time': 0,  # 平均等待时间(时间步)
             'total_waiting_time': 0,  # 总等待时间
             'max_waiting_time': 0,  # 最长等待时间
 
-            # 时间利用率统计
+            # 时间利用率
             'total_connection_time': 0,  # 总连接时长
             'charger_utilization': 0,  # 充电桩利用率(总连接时长/(当前时段*充电桩数))
 
-            # 实时指标
+            # 其他实时指标
             'current_connection_rate': 0,  # 当前连接率(当前连接数/总连接点数)
             'current_charging_power': 0,  # 当前总充电功率(电池状态的charging_power累加)
             'current_success_rate': 0  # 当前服务成功率(完全满足数/总连接数)
         }
 
-    def check_arrivals(self, print_details=False) -> None:
+    def check_arrivals(self, print_details=True) -> None:
         """检查并处理当前时刻到达的电池。
 
         当电池到达时，根据接入点可用性进行处理：
@@ -1679,7 +1693,8 @@ class BatteryStationManager:
                         max_kw=self.max_power[idx],
                         max_kwh=self.capacity[idx],
                         initial_soc=self.initial_soc[idx],
-                        pf=self.EV_PF
+                        pf=self.EV_PF,
+                        curve_type=self.curve_type,
                     )
                     # 更新已连接电池列表
                     self.connected_batteries[idx] = name
@@ -1698,7 +1713,7 @@ class BatteryStationManager:
                     # 更新等待队列统计
                     self.update_statistics('arrival', waiting=True)
                     if print_details:
-                        print(f"时间步 {self.current_step} 执行前: 电池 {self.battery_names[idx]} 加入等待队列")
+                        print(f"时间步 {self.current_step} 执行前: 电池 {self.battery_names[idx]} 已加入等待队列")
 
     def check_departures(self, print_details=True) -> None:
         """检查当前时刻离开的已连接电池并断开连接。
@@ -1769,7 +1784,7 @@ class BatteryStationManager:
 
             del self.connected_batteries[idx]
 
-    def process_waiting_queue(self) -> None:
+    def process_waiting_queue(self, print_details=True) -> None:
         """处理等待队列中的电池。
 
         从队列中取出等待的电池，并尝试为它们分配可用的充电接入点。
@@ -1792,7 +1807,8 @@ class BatteryStationManager:
             if self.current_step >= self.departure[idx]:
                 # 借用到达统计更新拒绝服务信息
                 self.update_statistics('arrival', rejected=True)
-                print(f"时间步 {self.current_step}: 电池 {self.battery_names[idx]} 已错过离开时间，无法接入")
+                if print_details:
+                    print(f"时间步 {self.current_step} 执行前: 排队电池 {self.battery_names[idx]} 已需离开，无法接入")
                 continue
 
             # 连接电池
@@ -1804,7 +1820,8 @@ class BatteryStationManager:
                 max_kw=self.max_power[idx],
                 max_kwh=self.capacity[idx],
                 initial_soc=self.initial_soc[idx],
-                pf=self.EV_PF
+                pf=self.EV_PF,
+                curve_type=self.curve_type,
             )
 
             # 计算等待时间并更新统计
@@ -1822,7 +1839,8 @@ class BatteryStationManager:
             self.battery_connection_points[idx] = connection_point_id
             self.battery_connection_points_history[idx] = connection_point_id
 
-            print(f"时间步 {self.current_step} 执行前: 排队电池 {name} 已接入")
+            if print_details:
+                print(f"时间步 {self.current_step} 执行前: 排队电池 {name} 已接入")
 
     def update_statistics(self, update_type, **kwargs) -> None:
         """统一更新统计信息的函数
@@ -1839,7 +1857,7 @@ class BatteryStationManager:
                 # 电池进入等待队列
                 self.stats['waiting_count'] += 1
             if kwargs.get('rejected', False):
-                # 电池被拒绝（预计无法在停留时间内连接）
+                # 电池被拒绝（无法在停留时间内连接）
                 self.stats['rejected_count'] += 1
 
             # 更新当前连接率
@@ -1854,7 +1872,7 @@ class BatteryStationManager:
             departure_time = kwargs.get('departure_time', self.current_step)
             is_target_achieved = kwargs.get('is_target_achieved', False)
 
-            # 更新已连接电池计数 Checked
+            # 更新已连接计数 Checked
             self.stats['connected_count'] += 1
             self.stats['active_count'] -= 1
 
@@ -1862,7 +1880,7 @@ class BatteryStationManager:
             self.stats['completed_count'] += 1
             self.stats['completed_soc'] += final_soc - initial_soc
 
-            # 更新目标达成率 - 充电进度/目标进度
+            # 更新目标能量满足率 - 充电进度/目标进度
             if is_target_achieved:
                 self.stats['target_achieved_count'] += 1
                 target_ratio = 1.0
@@ -1929,21 +1947,12 @@ class BatteryStationManager:
             self.stats['current_charging_power'] = total_charging_power
 
     def update_schedule(self):
-        """更新EV电池功率记录"""
-        # total_charging_power = 0
+        """更新EV电池充电功率矩阵"""
         for idx, name in self.connected_batteries.items():
             bat_status = self.controller.get_battery_status(name)
             if bat_status:
                 # 记录EV视角的功率，正值表示充电
                 self.schedule[idx, self.current_step] = bat_status['charging_power']
-            # if self.arrival[idx] <= self.current_step < self.departure[idx]:
-            #     bat_status = self.controller.get_battery_status(name)
-            #     if bat_status:
-            #         # 记录EV视角的功率，正值表示充电
-            #         self.schedule[idx, self.current_step] = bat_status['charging_power']
-                # total_charging_power += bat_status['charging_power']
-        # 更新当前充电功率
-        # self.stats['current_charging_power'] = total_charging_power
 
     def update_storage_statuses(self):
         """更新储能电池的状态信息"""
@@ -1957,26 +1966,32 @@ class BatteryStationManager:
 
     def export_schedule(self, output_path=None):
         """
-        导出电池功率调度记录到 CSV 文件
+        导出EV电池功率矩阵到 CSV 文件
 
-        Arg:
+        Args:
             output_path (str): 输出文件名，缺省时使用 "schedule.csv"
 
         Returns:
             bool: 是否成功导出
         """
         try:
+            output_file = output_path if output_path else "schedule.csv"
+
+            # 检查目录是否存在，如果不存在则创建
+            output_dir = os.path.dirname(output_file)
+            if output_dir and not os.path.exists(output_dir):
+                os.makedirs(output_dir)
+
             col_names = [f"step_{i}" for i in range(self.total_steps)]
             df = pd.DataFrame(self.schedule, index=self.battery_names, columns=col_names)
-            output_file = output_path if output_path else "schedule.csv"
             df.to_csv(output_file, index=True)
-            print(f"调度记录已导出到 {output_file}")
+            print(f"EV电池功率矩阵已导出到 {output_file}")
             return True
         except Exception as e:
-            print(f"导出调度记录失败: {e}")
+            logging.error(f"导出EV电池功率矩阵失败: {e}")
             return False
 
-    def export_storage(self, output_path=None):
+    def export_storage_statuses(self, output_path=None):
         """
         导出储能放电功率和能量记录到 CSV 文件
 
@@ -1987,15 +2002,33 @@ class BatteryStationManager:
             bool: 是否成功导出
         """
         try:
+            # 创建输出目录（如果不存在）
+            if output_path:
+                output_dir = os.path.dirname(output_path)
+                if output_dir and not os.path.exists(output_dir):
+                    os.makedirs(output_dir)
+
+            # 准备数据
             col_names = [f"step_{i}" for i in range(self.total_steps)]
             power_df = pd.DataFrame(self.storage_schedule, index=self.circuit.storage_batteries.keys(),
                                     columns=col_names)
             energy_df = pd.DataFrame(self.storage_energy, index=self.circuit.storage_batteries.keys(),
                                      columns=col_names)
 
+            # 确定输出文件路径
             power_output_file = output_path if output_path else "storage_schedule.csv"
-            energy_output_file = output_path.replace("_schedule.csv", "_energy.csv") if output_path else "storage_energy.csv"
 
+            # 为能量文件创建合理的文件名
+            if output_path and "_schedule" in output_path:
+                energy_output_file = output_path.replace("_schedule", "_energy")
+            elif output_path:
+                # 在文件扩展名前添加 _energy
+                base, ext = os.path.splitext(output_path)
+                energy_output_file = f"{base}_energy{ext}"
+            else:
+                energy_output_file = "storage_energy.csv"
+
+            # 导出数据
             power_df.to_csv(power_output_file, index=True)
             energy_df.to_csv(energy_output_file, index=True)
 
@@ -2003,37 +2036,8 @@ class BatteryStationManager:
             print(f"储能能量记录已导出到 {energy_output_file}")
             return True
         except Exception as e:
-            print(f"导出储能记录失败: {e}")
+            logging.error(f"导出储能记录失败: {e}")
             return False
-
-    def update_before_solve(self):
-        """在OpenDSS求解前更新，处理电池到达、队列和离开
-        Todo: 未启用，待检查和其余地方的冲突"""
-        # 1. 处理到达的电池
-        self.check_arrivals()
-
-        # 2. 处理等待队列中的电池
-        self.process_waiting_queue()
-
-        # 3. 设置电池功率（如果需要根据需求调整功率，可在此处添加）
-
-        # 4. 更新所有电池的状态
-        self.controller.update_all_before_solve()
-
-    def update_after_solve(self):
-        """在OpenDSS解后更新，记录数据并处理电池离开
-        Todo: 未启用，待检查和其余地方的冲突"""
-        # 1. 更新所有电池的状态
-        self.controller.update_all_after_solve()
-
-        # 2. 更新电池排程记录
-        self.update_schedule()
-
-        # 3. 断开离开的电池
-        self.check_departures()
-
-        # 4. 更新计数器
-        self.current_step += 1
 
     def get_connection_status(self):
         """获取当前所有接入点和电池连接状态，需要调整结构，按照电池连接点的方式或者补齐长度
@@ -2058,7 +2062,7 @@ class BatteryStationManager:
         return status
 
     def get_all_statuses(self):
-        """返回所有充电桩位置的状态
+        """返回所有连接点的状态
 
         Returns:
             list: 包含所有充电桩状态的列表，每个充电桩返回[soc, power_ratio]
@@ -2091,15 +2095,15 @@ class BatteryStationManager:
                     else:
                         # 电池对象不存在，返回零状态——经输出检查，实际不存在这种情况
                         statuses.append([0.0, 0.0])
-                        # print("电池对象不存在，返回零状态")
+                        logging.debug("电池对象不存在，返回零状态")
                 else:
                     # 连接索引存在但电池名称不存在，返回零状态——经输出检查，实际不存在这种情况
                     statuses.append([0.0, 0.0])
-                    # print("连接索引存在但电池名称不存在，返回零状态")
+                    logging.debug("连接索引存在但电池名称不存在，返回零状态")
             else:
                 # 充电桩未连接电池，返回零状态
                 statuses.append([0.0, 0.0])
-        # print(f"从函数get_all_statuses中返回的状态长度为 {len(statuses)}")  # 通过输出检查
+        logging.debug(f"从函数get_all_statuses中返回的状态长度为 {len(statuses)}")  # 通过输出检查
         return statuses
 
     def _find_connection_point(self, idx):
@@ -2119,22 +2123,6 @@ class BatteryStationManager:
         status = self.controller.get_battery_status(name)
         return status['soc_percent'] if status else 0
 
-    def step(self):
-        """执行一个完整的时间步的方法调用示例，并不实际运行"""
-        self.update_before_solve()
-
-        # 默认使用SolveNoControl方法
-        self.circuit.dss.ActiveCircuit.Solution.SolveNoControl()
-
-        self.update_after_solve()
-
-        # 返回当前状态信息
-        return {
-            'current_step': self.current_step - 1,
-            'connected_batteries': len(self.connected_batteries),
-            'waiting_queue': len(self.waiting_queue)
-        }
-
     def reset(self):
         """重置电池站状态"""
         # 断开所有连接的电池
@@ -2142,79 +2130,26 @@ class BatteryStationManager:
             self.controller.disconnect_battery(name)
 
         # 恢复初始状态
+        self.current_step = 0
         self.waiting_queue = deque()
         self.connected_batteries = {}
         self.connection_next_avail = [0] * self.initial_data['num_connection_points']
-        self.current_step = 0
-        self.schedule = np.zeros((self.battery_count, self.total_steps))
 
-        # 重置性能统计
-        self.stats = {
-            # 基本连接统计
-            'connected_count': 0,  # 已连接的EV电池数【原计划用于统计已连接过的EV数，在断开时计数】
-            'rejected_count': 0,  # 未能连接的EV电池数
-            'waiting_count': 0,  # 进入等待队列的EV电池数
-            'active_count': 0,  # 当前连接的EV电池数
+        # 重置EV电池与连接点的对应关系
+        self.battery_connection_points = {}
+        self.battery_connection_points_history = {}
+        self.schedule = np.zeros((self.battery_count, self.total_steps), dtype=np.float32)
 
-            # 能量统计
-            'total_discharge': 0,  # 总放电量(kWh)
-            'total_charge': 0,  # 总充电量(kWh)
-            'net_energy': 0,  # 净能量交换(kWh)
+        # 重置储能相关数组
+        self.storage_schedule = np.zeros((len(self.circuit.storage_batteries), self.total_steps), dtype=np.float32)
+        self.storage_energy = np.zeros((len(self.circuit.storage_batteries), self.total_steps), dtype=np.float32)
 
-            # 充电满足度统计
-            'completed_count': 0,  # 完成充电的EV电池数【原计划用于统计满足需求的EV数】
-            'completed_soc': 0,  # 完成充电的EV电池的SOC增加总和
-            'avg_completed_soc': 0,  # 完成充电的EV电池的平均增加的SOC
-            'charge_satisfaction_ratio': 0,  # EV电池能量满足率之和（单个EV电池的满足率离开时的充电能量比所需的充电能量）
-            'target_achieved_count': 0,  # 达到目标SOC（能量满足率为1，完全满足）的EV电池数
-            'avg_target_achieved': 0,  # 充电满足率平均值(满足率之和/总连接数)
+        # 重置统计数据
+        for key in self.stats:
+            self.stats[key] = 0  # 所有统计数据重置为0
 
-            # 服务质量统计
-            'avg_waiting_time': 0,  # 平均等待时间(时间步)
-            'total_waiting_time': 0,  # 总等待时间
-            'max_waiting_time': 0,  # 最长等待时间
-
-            # 时间利用率统计
-            'total_connection_time': 0,  # 总连接时长
-            'charger_utilization': 0,  # 充电桩利用率(总连接时长/(当前时段*充电桩数))
-
-            # 实时指标
-            'current_connection_rate': 0,  # 当前连接率(当前连接数/总连接点数)
-            'current_charging_power': 0,  # 当前总充电功率(电池状态的charging_power累加)
-            'current_success_rate': 0  # 当前服务成功率(完全满足数/总连接数)
-        }
-
-        print("BatteryStationManager已重置")
+        logging.debug("BatteryStationManager 已重置")
         return True
-
-    def get_statistics(self, schedule):
-        """计算并返回整体的性能统计"""
-        # 计算已连接过的电池数量
-        connected_count = np.count_nonzero(schedule.sum(axis=1))
-
-        # 计算总放电量和充电量
-        discharge_mask = schedule > 0
-        charge_mask = schedule < 0
-        total_discharge = schedule[discharge_mask].sum() * 0.25  # 每15分钟乘以0.25小时
-        total_charge = -schedule[charge_mask].sum() * 0.25
-
-        # 根据schedule计算统计信息
-        self.stats.update({
-            'connected_count': connected_count,
-            'total_discharge': total_discharge,
-            'total_charge': total_charge,
-            'net_energy': total_charge - total_discharge
-        })
-
-        # 打印性能指标
-        print(f"电池站调度结果：")
-        print(f"    接入的电池数量: {int(connected_count)}")
-        print(f"    总放电量: {total_discharge:.2f} kWh")
-        print(f"    总充电量: {total_charge:.2f} kWh")
-        print(f"    净能量: {total_discharge - total_charge:.2f} kWh")
-        print(f"    被拒绝的电池数量: {self.stats['rejected_count']}")
-
-        return self.stats
 
 
 # %% 弃用 Deprecated

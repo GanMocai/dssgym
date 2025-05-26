@@ -28,6 +28,7 @@ Note: 修改对应位置
     拓扑设置在对应daily的dss文件中修改；
     时间步修改在dss和env_register中修改；
 """
+import logging
 
 import gymnasium as gym
 from gymnasium.utils import seeding
@@ -156,7 +157,7 @@ def choose_batteries(env, k=10, on_plot=True, node_bound='minimum') -> list[str]
 
 
 def get_basekv(env, buses) -> list[str]:
-    """获取打印指定母线的基准电压，并返回
+    """获取指定母线的基准电压，打印并返回
 
     Args:
         env: 环境对象
@@ -184,9 +185,7 @@ class ActionSpaceV0:
         bat_num (int): 电池的数量
         reg_act_num (int): 调压器控制动作数量
         bat_act_num (int): 电池控制动作数量
-        space (gym.spaces): 来自gym的空间对象
-
-    note: 如果使用离散电池，space是MultiDiscrete类型；否则，space是MultiDiscrete和Box的元组
+        space (gym.spaces): 来自gym的空间对象  对于电池的动作部分：如果使用离散电池，space是MultiDiscrete类型；否则，space是MultiDiscrete和Box的元组
     """
 
     def __init__(self, CRB_num, RB_act_num):
@@ -231,15 +230,13 @@ class ActionSpaceV0:
 
 
 class ActionSpace:
-    """电池充电功率的动作空间封装。剔除电容和变压器抽头的动作。
+    """电池充电功率的动作空间封装。移除电容和变压器抽头的动作。
 
     Attributes:
         bat_num (int): 电池的总数量
         sto_num (int): 储能电池的数量
         bat_act_num (int): 每个电池控制动作的数量
-        space (gym.spaces): 来自gym的空间对象
-
-    note: 如果使用离散电池，space是MultiDiscrete类型；否则，space是Box类型
+        space (gym.spaces): 来自gymnasium的空间对象 (如果使用离散电池，space是MultiDiscrete类型；否则，space是Box类型)
     """
 
     def __init__(self, bat_num, sto_num, bat_act_num):
@@ -255,7 +252,7 @@ class ActionSpace:
             # 连续
             # self.space = gym.spaces.Box(low=-1, high=1, shape=(self.bat_num,),
             #                             dtype=np.float32)  # To avoid or confine V2G, 改变 high，因为是发电机，然后我懒得改.
-            # 修改以使EV电池不V2G
+            # 修改以避免V2G
             high = np.zeros(self.bat_num)
             high[:sto_num] = 1.0
             self.space = gym.spaces.Box(low=-1.0, high=high, dtype=np.float32)
@@ -405,11 +402,11 @@ class Env(gym.Env):
         self.ev_charger_kW = info['charger_kW'] # 用与保存到训练信息
         self.ev = load_ev_from_csv(info['ev_demand'])  # EV信息
         self.ev_controller = BatteryController(self.circuit)
-        self.circuit.ev_controller = self.ev_controller
+        self.circuit.battery_controller = self.ev_controller
         self.ev_station = BatteryStationManager(self.circuit, self.station_bus, self.con_num, self.ev_charger_kW,
                                                 self.ev['arrival'],self.ev['departure'],
                                                 self.ev['max_power'] ,self.ev['initial_soc'], self.ev['target_soc'],
-                                                self.ev['capacity'])
+                                                self.ev['capacity'],self.ev['curve_type'])
         self.circuit.ev_station = self.ev_station  # 将充电站添加到电路引用
 
         # 检查参数范围
@@ -450,33 +447,40 @@ class Env(gym.Env):
 
         if self.wrap_observation:
             low, high = [0.8] * nnode, [1.2] * nnode  # add voltage bound  节点电压标幺值
-            print(f"\n电压边界维度: {nnode}")
+            logging.debug(f"\n电压边界维度: {nnode}")
             low, high = low + [0] * self.cap_num, high + [1] * self.cap_num  # add cap bound 电容投切
-            print(f"电容边界维度: {self.cap_num}")
+            logging.debug(f"电容边界维度: {self.cap_num}")
             low, high = low + [0] * self.reg_num, high + [self.reg_act_num] * self.reg_num  # add reg bound 抽头
-            print(f"Regulator边界维度: {self.reg_num}")
+            logging.debug(f"Regulator边界维度: {self.reg_num}")
             low, high = low + [0, -1] * self.bat_num, high + [1, 1] * self.bat_num  # add bat bound (SOC, 功率)
-            print(f"电池边界维度: {self.bat_num * 2}")
+            logging.debug(f"电池边界维度: {self.bat_num * 2}")
 
             # 添加充电站实时指标维度
+            dim_before = len(low)
             low, high = low + [0.0, 0.0, 0.0, 0.0, 0.0], high + [1.0, float('inf'), float('inf'), 1.0, float('inf')]  # 连接率,充电功率,总连接数,成功率,平均能量满足率
-            print(f"EV station metrics dimension: 5")
+            logging.debug(f"EV station metrics dimension: {len(low)-dim_before}")
 
             if observe_load:
                 low, high = low + [0.0] * nload, high + [1.0] * nload  # add load bound
-                print(f"Load 边界维度: {nload}")
+                logging.debug(f"Load 边界维度: {nload}")
             low, high = np.array(low, dtype=np.float32), np.array(high, dtype=np.float32)
             self.observation_space = gym.spaces.Box(low, high, dtype=np.float32)  # Note: 设置为np.float32试试水
-            # 打印总维度
-            print(f"观察空间维度设置为: {len(low)}")
+            # 总维度数
+            logging.info(f"观察空间维度设置为: {len(low)}")
         else:
             bat_dict = {bat: gym.spaces.Box(np.array([0, -1]), np.array([1, 1]), dtype=np.float32)
                         for bat in self.obs['bat_statuses'].keys()}
             obs_dict = {
                 'bus_voltages': gym.spaces.Box(0.8, 1.2, shape=(nnode,)),
                 'cap_statuses': gym.spaces.MultiDiscrete([2] * self.cap_num),
-                'reg_statuses': gym.spaces.MultiDiscrete([self.reg_act_num] * self.cap_num),
-                'bat_statuses': gym.spaces.Dict(bat_dict)
+                'reg_statuses': gym.spaces.MultiDiscrete([self.reg_act_num] * self.reg_num),  # 修正为self.reg_num，原本为cap_num
+                'bat_statuses': gym.spaces.Dict(bat_dict),
+                # 添加充电站指标
+                'ev_connection_rate': gym.spaces.Box(0.0, 1.0, shape=(1,)),
+                'ev_charging_power': gym.spaces.Box(0.0, float('inf'), shape=(1,)),
+                'ev_connected_count': gym.spaces.Box(0.0, float('inf'), shape=(1,)),
+                'ev_success_rate': gym.spaces.Box(0.0, 1.0, shape=(1,)),
+                'avg_target_achieved': gym.spaces.Box(0.0, float('inf'), shape=(1,))
             }
             if observe_load:
                 obs_dict['load_profile_t'] = gym.spaces.Box(0.0, 1.0, shape=(nload,))
@@ -566,10 +570,10 @@ class Env(gym.Env):
             total_kVA = np.sqrt(total_kW ** 2 + total_kVar ** 2)
             remain_kVA = 0.75 * tf_kVA - total_kVA
             if total_kVA > tf_kVA:
-                print("超出专变容量上限")
+                logging.warning("超出专变容量上限")
                 return 1000 * self.tf_capacity_w * remain_kVA
             elif total_kVA > 0.75 * tf_kVA:
-                print("超出专变安全限值")
+                logging.warning("超出专变安全限值")
                 return self.tf_capacity_w * remain_kVA
             else:
                 return 0
@@ -592,7 +596,7 @@ class Env(gym.Env):
                              'PowerLoss_reward': powerloss, 'Voltage_reward': voltage, 'Control_reward': ctrl,
                              'Connection_reward': connection, 'Completion_reward': completion, 'Energy_reward': energy, 'Transformer_reward': transformer})
 
-            print(f"奖励各项的值：{powerloss=}, {voltage=}, {ctrl=}, {connection=}, {completion=}, {energy=}, {transformer=}.")
+            logging.info(f"奖励各项：{powerloss=}, {voltage=}, {ctrl=}, {connection=}, {completion=}, {energy=}, {transformer=}.")
 
             return total_reward, info
 
@@ -613,15 +617,15 @@ class Env(gym.Env):
 
         # 匹配空间维度，改起来太麻烦
         if self.reg_num > 0:
-            # 保留当前电容器和调压器状态
-            # 由于不改变电容器和调压器状态，差值为0
+            # 保留当前调压器状态
+            # 由于不改变调压器状态，差值为0
             reg_statuses = {name: reg.tap for name, reg in self.circuit.regulators.items()}
             regdiff = [0] * self.reg_num
         else:
             regdiff, reg_statuses = [], dict()
         if self.cap_num > 0:
-            # 保留当前电容器和调压器状态
-            # 由于不改变电容器和调压器状态，差值为0
+            # 保留当前电容器状态
+            # 由于不改变电容器状态，差值为0
             cap_statuses = {name: cap.status for name, cap in self.circuit.capacitors.items()}
             capdiff = [0] * self.cap_num
         else:
@@ -633,10 +637,11 @@ class Env(gym.Env):
         self.ev_station.check_arrivals()  # 检查到达
         self.ev_station.process_waiting_queue()  # 处理等待队列
 
+        print(f"智能体的动作为: {action}")
+
         # 控制电池功率
         if self.bat_num > 0:
             states = action  # 整个 action 向量都是电池功率控制信号
-            print(f"智能体的动作为: {states}")
             self.circuit.set_all_batteries_before_solve(states)  # 具体控制
             self.str_action += 'Bat Status:' + str(states)
 
@@ -649,7 +654,7 @@ class Env(gym.Env):
             # bat_statuses = {name: [bat.soc, -1 * bat.actual_power() / bat.max_kw] for name, bat in self.circuit.batteries.items()}
             # 创建包含所有电池的状态字典
             bat_statuses = {}
-            # 首先添加电路中定义的静态电池
+            # 首先添加电路中定义的储能电池
             for name, bat in self.circuit.storage_batteries.items():
                 bat_statuses[name] = [bat.soc, -1 * bat.actual_power() / bat.max_kw]
 
@@ -662,7 +667,7 @@ class Env(gym.Env):
         else:
             soc_errs, dis_errs, bat_statuses = [], [], dict()
 
-        # print(f'当前在执行step函数，电池状态键值对的数量为{len(bat_statuses)}.')  # 通过输出检查电池接入情况
+        logging.debug(f'当前在执行step函数，电池状态键值对的数量为{len(bat_statuses)}.')  # 通过输出检查电池接入情况
         # 更新统计数据，以免被离开检查提前释放，没记录上。
         # 更新总功率
         self.ev_station.update_statistics(update_type="summary")
@@ -742,13 +747,13 @@ class Env(gym.Env):
             try:
                 arr = np.array(obj, dtype=float)
                 if np.any(~np.isfinite(arr)) or np.any(np.abs(arr) > 1e10):
-                    print(f"检测到极端值 '{key}': {obj}")
+                    logging.warning(f"检测到极端值 '{key}': {obj}")
             except (TypeError, ValueError):
                 # 无法转换为数值数组，跳过
                 pass
         elif isinstance(obj, (int, float)):
             if not np.isfinite(obj) or abs(obj) > 1e10:
-                print(f"检测到极端值 '{key}': {obj}")
+                logging.warning(f"检测到极端值 '{key}': {obj}")
 
     def reset(self, *, seed: int | None = None, options: dict[str, any] | None = None):
         """重置环境状态以开始新的回合，符合gymnasium的更新要求，添加了重置充电站
@@ -808,7 +813,7 @@ class Env(gym.Env):
         # bat_statuses = {name: [bat.soc, -1 * bat.actual_power() / bat.max_kw] for name, bat in
         #                 self.circuit.batteries.items()}  # 原本
         bat_statuses = {}
-        # 添加电路中定义的静态电池
+        # 添加电路中定义的静态储能电池
         for name, bat in self.circuit.storage_batteries.items():
             bat_statuses[name] = [bat.soc, -1 * bat.actual_power() / bat.max_kw]
 
