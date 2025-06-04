@@ -1,0 +1,4 @@
+ev_demand_path: D:\LENOVO\Documents\Python\ML\powergym\ev_demand\ev_demand-public_parking-general-250-A95.csv
+ev_station_bus: 680
+ev_charger_num: 10
+ev_charger_kW: [120, 120, 120, 120, 120, 120, 120, 120, 120, 120]
