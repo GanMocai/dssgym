@@ -976,7 +976,7 @@ class Capacitor(Node):
 
 class Battery(Node):
     """
-    继承自Node，通过Load定义了电力系统的电池对象，包括单相和三相电池。
+    继承自Node，通过对OpenDSS中的Load实际对象添加额外特性，定义电力系统的电池对象，包括单相和三相电池。
     """
 
     def __init__(self, dss, batname, bus1, phases, feature, bat_act_num=33):

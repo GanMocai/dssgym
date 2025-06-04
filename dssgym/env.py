@@ -27,6 +27,8 @@ Note: 修改对应位置
         动作空间的修改还需要在battery的功率映射中中进行调整。
     拓扑设置在对应daily的dss文件中修改；
     时间步修改在dss和env_register中修改；
+
+曾使用monkey patch临时替换函数reset，参考自 https://yuanbao.tencent.com/chat/naQivTmsDa/26ca9f85-b738-4e39-8d3d-7550578fdb25
 """
 import logging
 

@@ -30,15 +30,22 @@ plt.rcParams['axes.unicode_minus'] = False
 plt.rcParams['font.size'] = 12
 
 def plot_training_reward(csv_path, index:int=0):
+    """
+
+    Args:
+        csv_path: 训练过程奖励数据的CSV文件路径。
+        index: 图片后缀，便于区分，防止覆盖。
+
+    Returns:
+        None
+    """
     df = pd.read_csv(csv_path)
-    # episodes = df["step"]  # 命名成step了，尴尬，太赶了
-    # rewards = df["reward"]
 
     # 确保数据类型正确（将step和reward列转换为数值类型）
-    df["step"] = pd.to_numeric(df["step"], errors="coerce")
+    df["step"] = pd.to_numeric(df["step"], errors="coerce") # 其实是episode
     df["reward"] = pd.to_numeric(df["reward"], errors="coerce")
 
-    # 使用窗口大小100计算移动平均奖励，使曲线更平滑
+    # 使用窗口大小100计算移动平均回合奖励
     window = 100
     # 在DataFrame上直接计算移动平均
     df['rewards_ma'] = df['reward'].rolling(window=window, min_periods=1).mean()
@@ -53,7 +60,7 @@ def plot_training_reward(csv_path, index:int=0):
     plt.plot(episodes, rewards, 'b-', alpha=0.3, label="单回合奖励")
     plt.plot(episodes, rewards_ma, 'r-', linewidth=2, label="移动平均奖励")
     # 自动调整Y轴范围，使图像更清晰
-    # 设置合理的Y轴范围，排除极端值的影响——1-3需要
+    # 设置合理的Y轴范围，排除极端值的影响
     reward_q1 = pd.Series(rewards).quantile(0.000005)  # 5%分位数
     reward_q3 = pd.Series(rewards).quantile(1)  # 95%分位数
     y_min = max(reward_q1 / 1.5, min(rewards_ma) / 1.2)  # 确保能显示移动平均线
@@ -69,7 +76,16 @@ def plot_training_reward(csv_path, index:int=0):
     plt.show()
 
 
-def plot_test_reward(csv_path):
+def plot_test_reward(csv_path, index:int=0):
+    """
+    根据测试结果CSV文件绘制奖励曲线。
+    Args:
+        csv_path: 测试结果CSV文件的路径，包含各奖励函数分项及总奖励数据。
+        index: 图片后缀，便于区分，防止覆盖。
+
+    Returns:
+        None
+    """
     df = pd.read_csv(csv_path)
     plt.figure(figsize=(10, 6))
     # 假设CSV包含各奖励函数分项及总奖励数据，绘制所有曲线
@@ -80,50 +96,58 @@ def plot_test_reward(csv_path):
     plt.title("Test Reward Curve")
     plt.legend()
     plt.grid(True)
-    # plt.show()
+    plt.savefig(f'test_reward_curve_{index:02d}_{datetime.datetime.now().strftime("%Y%m%d")}.png', dpi=300)  # 保存图像
+    plt.show()
 
 
 def main():
     parser = argparse.ArgumentParser(description="根据CSV数据绘制奖励曲线")
     parser.add_argument("mode", choices=["train", "test"], help="选择绘制训练或测试奖励曲线")
-    parser.add_argument("csv_path",
-                        help="奖励数据CSV文件的路径，例如：D:\\LENOVO\\Documents\\Python\\ML\\dssgym\\results_20250503_165005_13Bus_1000000\\rewards_in_training.csv")
+    parser.add_argument("csv_paths", nargs='+',
+                        help="奖励数据CSV文件的路径，如：path/to/rewards_in_training.csv，可输入多个路径")
+    parser.add_argument("--indices", type=int, nargs='*',
+                        help="图表索引值，与CSV路径一一对应，不指定时自动从0开始编号")
     args = parser.parse_args()
 
-    if args.mode == "train":
-        plot_training_reward(args.csv_path)
-    elif args.mode == "test":
-        plot_test_reward(args.csv_path)
+    # 处理索引值，如果未提供或提供的数量不足，则自动补充
+    indices = args.indices if args.indices else []
+    if len(indices) < len(args.csv_paths):
+        # 如果有索引，则从最后一个索引值开始递增；否则从0开始
+        start_idx = indices[-1] + 1 if indices else 0
+        indices.extend(range(start_idx, start_idx + len(args.csv_paths) - len(indices)))
+        print(f"警告：索引数量不足，已自动从{start_idx}开始补充索引至: {indices}")
+
+    for i, csv_path in enumerate(args.csv_paths):
+        if args.mode == "train":
+                plot_training_reward(csv_path, indices[i])
+        elif args.mode == "test":
+                plot_test_reward(csv_path, indices[i])
 
 
 if __name__ == "__main__":
-    # main()
-    path = ['0']
-    # path_1 = r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250501_021615_13Bus_cbat_1000000_01\rewards_in_training.csv'
-    # path_2 = r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250502_005245_13Bus_cbat_s2_1000000_02\rewards_in_training.csv'
-    # path_3 = r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250502_125646_13Bus_1000000_03\rewards_in_training.csv'
-    # path_4 = r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250503_091058_13Bus_cbat_1000000_04\rewards_in_training.csv'
-    # path_5 = r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250503_124337_13Bus_cbat_s2_1000000_05\rewards_in_training.csv'
-    # path_6 = r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250503_165005_13Bus_1000000_06\rewards_in_training.csv'
-    # path_7 = r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250504_012306_13Bus_cbat_1000000_07\rewards_in_training.csv'
-    # path_8 = r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250504_055308_13Bus_cbat_1000000_08\rewards_in_training.csv'
-    # path.append(path_1)
-    # path.append(path_2)
-    # path.append(path_3)
-    # path.append(path_4)
-    # path.append(path_5)
-    # path.append(path_6)
-    # path.append(path_7)
-    # path.append(path_8)
-    path_list = [
-        r'D:\LENOVO\Documents\Python\ML\powergym\results_20250509_213723_13Bus_cbat_1000000\rewards_in_training.csv',
-        r'D:\LENOVO\Documents\Python\ML\powergym\results_20250510_132849_13Bus_cbat_1000000\rewards_in_training.csv',
-        r'D:\LENOVO\Documents\Python\ML\powergym\results_20250510_194947_13Bus_cbat_1000000\rewards_in_training.csv',
-        r'D:\LENOVO\Documents\Python\ML\powergym\results_20250513_224309_13Bus_1000000\rewards_in_training.csv',
-        r'D:\LENOVO\Documents\Python\ML\powergym\results_20250511_121502_13Bus_cbat_s2_1000000\rewards_in_training.csv',
-        r'D:\LENOVO\Documents\Python\ML\powergym\results_20250512_143129_13Bus_cbat_1000000\rewards_in_training.csv',
-        r'D:\LENOVO\Documents\Python\ML\powergym\results_20250514_092650_13Bus_1000000\rewards_in_training.csv',
-        r'D:\LENOVO\Documents\Python\ML\powergym\results_20250513_002728_13Bus_cbat_s2_1000000\rewards_in_training.csv',
-    ]
-    for index, path in enumerate(path_list):
-        plot_training_reward(path, index+1)
+    main()
+    # # 1st 轮 8 个算例
+    # path_list = [
+    #     r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250501_021615_13Bus_cbat_1000000_01\rewards_in_training.csv',
+    #     r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250502_005245_13Bus_cbat_s2_1000000_02\rewards_in_training.csv',
+    #     r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250502_125646_13Bus_1000000_03\rewards_in_training.csv',
+    #     r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250503_091058_13Bus_cbat_1000000_04\rewards_in_training.csv',
+    #     r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250503_124337_13Bus_cbat_s2_1000000_05\rewards_in_training.csv',
+    #     r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250503_165005_13Bus_1000000_06\rewards_in_training.csv',
+    #     r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250504_012306_13Bus_cbat_1000000_07\rewards_in_training.csv',
+    #     r'D:\LENOVO\Documents\Python\ML\dssgym\results_20250504_055308_13Bus_cbat_1000000_08\rewards_in_training.csv',
+    # ]
+    # # 2nd 轮 8 个算例
+    # path_list = [
+    #     r'D:\LENOVO\Documents\Python\ML\powergym\results_20250509_213723_13Bus_cbat_1000000\rewards_in_training.csv',
+    #     r'D:\LENOVO\Documents\Python\ML\powergym\results_20250510_132849_13Bus_cbat_1000000\rewards_in_training.csv',
+    #     r'D:\LENOVO\Documents\Python\ML\powergym\results_20250510_194947_13Bus_cbat_1000000\rewards_in_training.csv',
+    #     r'D:\LENOVO\Documents\Python\ML\powergym\results_20250513_224309_13Bus_1000000\rewards_in_training.csv',
+    #     r'D:\LENOVO\Documents\Python\ML\powergym\results_20250511_121502_13Bus_cbat_s2_1000000\rewards_in_training.csv',
+    #     r'D:\LENOVO\Documents\Python\ML\powergym\results_20250512_143129_13Bus_cbat_1000000\rewards_in_training.csv',
+    #     r'D:\LENOVO\Documents\Python\ML\powergym\results_20250514_092650_13Bus_1000000\rewards_in_training.csv',
+    #     r'D:\LENOVO\Documents\Python\ML\powergym\results_20250513_002728_13Bus_cbat_s2_1000000\rewards_in_training.csv',
+    # ]
+    # for index, path in enumerate(path_list):
+    #     plot_training_reward(path, index+1)
+

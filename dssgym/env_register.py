@@ -25,7 +25,6 @@ Note: 比例因子 scale 为负载曲线倍数，缩放从csv读取得到的负�
 
 Improve:
     1. 修改了最终的Env类的参数设置，最大步数改为96，移除了regulator和电容器的奖励权重
-
 """
 
 import os
@@ -456,3 +455,4 @@ def remove_parallel_dss(env_name, num_workers):
             fname = base[:-4] + '_' + str(i) + '.dss'
             if os.path.exists(fname):
                 os.remove(fname)
+

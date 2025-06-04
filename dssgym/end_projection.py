@@ -5,9 +5,10 @@
 # @Software : PyCharm
 
 """
-针对powergym，不具有泛用性。
 为适应不对称空间出现的连续动作空间收缩（导致储能不放电影响），添加动作后处理映射。
 对于离散动作空间类似处理。
+
+Note: 针对DSSGym，不具有泛用性。
 """
 
 import gymnasium as gym

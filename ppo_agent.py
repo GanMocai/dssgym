@@ -5,11 +5,15 @@
 # @Software : PyCharm
 
 """
-用SB3的PPO算法作为智能体进行训练，主程序
-note: 统一设置各种随机seed为27
-note: 在原始代码执行过程中，保存模型时，未使用cwd则会保存到对应dss文件所在目录；保存图片在dssgym文件夹下的plots目录中
-note: 自定义网络参数的方式可见 https://kimi.moonshot.cn/chat/cv8ol6kchmtsrgk9q630
-曾使用monkey patch临时替换函数reset，参考自 https://yuanbao.tencent.com/chat/naQivTmsDa/26ca9f85-b738-4e39-8d3d-7550578fdb25
+主程序
+使用SB3的PPO算法训练智能体，使用实现的DSSGym环境进行电力系统仿真。
+
+算法调参：
+    1. 自定义PPO网络参数的方式可见 https://kimi.moonshot.cn/chat/cv8ol6kchmtsrgk9q630
+
+Note:
+    1. 统一设置各种随机seed为27
+    2. 在原始代码执行过程中，保存模型时，未使用cwd则会保存到对应dss文件所在目录；保存图片在dssgym文件夹下的plots目录中
 """
 
 from stable_baselines3 import PPO
