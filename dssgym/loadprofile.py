@@ -1,28 +1,36 @@
+# Copyright 2021 Siemens Corporation
+# Copyright 2025 Su Chenhui
 # SPDX-License-Identifier: MIT
 
 """
+Todo:
+    1. 处理这里的一个冗余逻辑，检测到dss文件中的负载曲线不带daily后，自动生成新的dss文件.
+    2. 负载曲线生成的参考源添加自定义机制，不局限于
+
 `loadprofile.py` 模块用于为电力系统中的负载生成负载曲线。
 它从指定的文件夹读取负载形状文件，并根据指定的步数和比例因子生成负载曲线。主要功能包括：
 1. `LoadProfile` 类：用于创建和管理负载曲线。
-    2. `__init__` 方法：初始化负载曲线生成器，设置步数、文件夹路径和负载名称。
-    3. `create_file_with_daily` 方法：创建一个新的负载文件，并将其与日负载形状相关联。
-    4. `add_redirect_and_mode_at_main_daily_dss` 方法：在主日负载文件中添加重定向和模式设置。
-    5. `find_load_file_from` 方法：查找主负载文件中的负载文件。
-    6. `find_load_names` 方法：查找主负载文件中的负载名称，并生成新的负载文件（如果需要）。
-    7. `gen_loadprofile` 方法：生成负载曲线并保存到指定文件夹。
-    8. `choose_loadprofile` 方法：选择特定的负载曲线文件。
-    9. `get_loadprofile` 方法：获取特定负载曲线的数据。
+    1. `__init__` 方法：初始化负载曲线生成器，设置步数、文件夹路径和负载名称。
+    2. `create_file_with_daily` 方法：创建一个新的负载文件，并将其与日负载形状相关联。
+    3. `add_redirect_and_mode_at_main_daily_dss` 方法：在主日负载文件中添加重定向和模式设置。
+    4. `find_load_file_from` 方法：查找主负载文件中的负载文件。
+    5. `find_load_names` 方法：查找主负载文件中的负载名称，并生成新的负载文件（如果需要）。
+    6. `gen_loadprofile` 方法：生成负载曲线并保存到指定文件夹。
+    7. `choose_loadprofile` 方法：选择特定的负载曲线文件。
+    8. `get_loadprofile` 方法：获取特定负载曲线的数据。
 
-Note: 进行了修改以将时间间隔从1hr改为15min
-    1. 添加了`interpolate_data`，用于将原始负载曲线数据从原始点数插值到目标点数—。
-    2. 修改了init方法，添加了`interpolate_to`参数，用于指定插值后的点数。
-    3. 重定义了`gen_loadprofile`方法，适配了插值逻辑。
+Improve:
+    1. 添加了 `interpolate_data` 方法，用于将原始负载曲线数据从原始点数插值到目标点数。
+    2. 修改了 init 方法，添加了 `interpolate_to` 参数，用于指定插值后的步数。
+    3. 修改了 `gen_loadprofile` 方法，适配了插值逻辑。
+
+Note:
+    1. 生成的负载曲线没有任何随机性
 """
 
 import numpy as np
 import pandas as pd
 import os
-from pathlib import Path
 from fnmatch import fnmatch
 
 from scipy.interpolate import interp1d
@@ -34,9 +42,12 @@ class LoadProfile:
         它从指定的文件夹读取负载形状文件，并根据指定的步数和比例因子生成负载曲线。
     """
 
-    def __init__(self, steps, dss_folder_path, dss_file, worker_idx=None, interpolate_to=None):
+    def __init__(self, steps, dss_folder_path, dss_file, worker_idx=None,
+                 interpolate_to=None,
+                 interpolate_kind='linear'):
         self.steps = steps
-        self.interpolate_to = interpolate_to  # 新添加的参数，表示是否将数据插值到指定的点数
+        self.interpolate_to = interpolate_to  # 目标步数
+        self.interpolate_kind = interpolate_kind  # 插值类型，缺省为'linear'
 
         self.dss_folder_path = dss_folder_path
         self.loadshape_path = os.path.join(dss_folder_path, 'loadshape')
@@ -53,7 +64,7 @@ class LoadProfile:
             if ('loadshape' in low) and low.endswith('.csv'):
                 self.FILES.append(os.path.join(self.loadshape_path, f))
 
-    def interpolate_data(self, data, original_steps=24, target_steps=96):
+    def interpolate_data(self, data, original_steps:int, target_steps:int):
         """将原始负载曲线数据从原始点数插值到目标点数
 
         Args:
@@ -67,11 +78,8 @@ class LoadProfile:
         x_original = np.linspace(0, 1, original_steps)
         # 创建插值后的时间点
         x_target = np.linspace(0, 1, target_steps)
-        # 使用线线插值
-        interpolator = interp1d(x_original, data, kind='linear')
-        # 使用三次样条插值
-        # interpolator = interp1d(x_original, data, kind='cubic')
-        # 返回插值结果
+        # 创建插值函数
+        interpolator = interp1d(x_original, data, kind=self.interpolate_kind)
         return interpolator(x_target)
 
     def create_file_with_daily(self, file_name):
@@ -148,7 +156,9 @@ class LoadProfile:
     def find_load_file_from(self, main_dss):
         """从dss文件中查找负载文件
         Args:
-            main_dss:
+            main_dss: 主dss文件名（字符串），用于查找其中重定向的负载文件
+        Returns:
+            load_file: 找到的负载文件名（字符串），如果未找到则为None
         """
         fin = open(os.path.join(self.dss_folder_path, main_dss), 'r', encoding='utf-8')
         load_file = None
@@ -169,7 +179,7 @@ class LoadProfile:
         """
             Find the loads with daily loadshapes at main dss or the load dss files.
             If there is none,
-            then generate new files (annotated _daily) with daily loadshapes.
+                then generate new files (annotated _daily) with daily loadshapes.
         """
 
         def find_load_name(fname, names):
@@ -220,66 +230,6 @@ class LoadProfile:
 
         return names
 
-    def gen_loadprofile_v0(self, scale=1.0):
-        """
-        生成负载曲线并保存到指定文件夹。
-        Args:
-            scale: 比例因子，用于缩放负载曲线数据
-        Returns:
-            episodes: 生成的负载曲线的数量
-        """
-        try:
-            dfs = []
-            for f in self.FILES:
-                dfs.append(pd.read_csv(f, header=None))
-            assert len(dfs) > 0, r'put load shapes files under ./loadshape'
-            df = pd.concat(dfs).rename(columns={0: 'mul'}).reset_index(drop=True)
-            if scale != 1.0:
-                df['mul'] = df['mul'] * scale
-        except:
-            print(r'put load shapes files under ./loadshape')
-
-        # Since we've concatenated all loadshape file together,
-        # the first load uses the top steps*days data points
-        # the second load uses the second chunk and so on.
-
-        # compute totoal number of episodes
-        episodes = len(df) // (self.steps * len(self.LOAD_NAMES))
-
-        # stop here only if the loadprofile folders exist
-        checks = [fnmatch(f, '0*') for f in os.listdir(self.loadshape_path)]
-        scale_txt = os.path.join(self.loadshape_path, 'scale.txt')
-        fscale = np.genfromtxt(scale_txt).reshape(1)[0] if os.path.exists(scale_txt) else None
-        if sum(checks) == episodes and fscale == scale:
-            return episodes
-
-        # save the scale for future use
-        np.savetxt(scale_txt, np.array([scale]))
-
-        # insert loadname, day, step columns
-        load_col, episode_col, step_col = [], [], []
-        for i in range(self.steps * episodes * len(self.LOAD_NAMES)):
-            load_col.append(self.LOAD_NAMES[i // (self.steps * episodes)])
-            episode_col.append((i // self.steps) % episodes)
-            step_col.append(i % self.steps)
-        df = df[:len(load_col)]
-        df['load'] = load_col
-        df['episode'] = episode_col
-        df['step'] = step_col
-
-        # sort and output
-        df = df.sort_values(by=['episode', 'load', 'step'])[['episode', 'load', 'step', 'mul']].reset_index(drop=True)
-        for episode in range(episodes):
-            if not os.path.exists(os.path.join(self.loadshape_path, str(episode).zfill(3))):
-                os.mkdir(os.path.join(self.loadshape_path, str(episode).zfill(3)))
-            sdf = df[df['episode'] == episode]
-            for load in self.LOAD_NAMES:
-                series = sdf[sdf['load'] == load]['mul']
-                series.to_csv(os.path.join(self.loadshape_path, str(episode).zfill(3), load + '.csv'),
-                              header=False, index=False)
-
-        return episodes  # number of distinct epochs
-
     def gen_loadprofile(self, scale=1.0):
         """
         为所有的负荷生成标幺化曲线并保存到指定文件夹. 重定义函数以匹配插值.
@@ -288,37 +238,35 @@ class LoadProfile:
         Returns:
             episodes: 生成的负载曲线的数量
         """
-        try:
-            dfs = []
-            for f in self.FILES:
-                dfs.append(pd.read_csv(f, header=None))
-            assert len(dfs) > 0, r'put load shapes files under ./loadshape'
-            df = pd.concat(dfs).rename(columns={0: 'mul'}).reset_index(drop=True)
-            if scale != 1.0:
-                df['mul'] = df['mul'] * scale
+        # 读取负载曲线参考文件
+        dfs = []
+        for f in self.FILES:
+            dfs.append(pd.read_csv(f, header=None))
+        assert len(dfs) > 0, r'put load shapes files under ./loadshape'
+        df = pd.concat(dfs).rename(columns={0: 'mul'}).reset_index(drop=True)
+        if scale != 1.0:
+            df['mul'] = df['mul'] * scale # df['mul'] 不是普通的 Python 列表，而是 Pandas 的 Series。对于 Series 或 Numpy 数组，* 运算符表示逐元素相乘（广播），不会扩充长度，只会让每个元素都乘以 scale。
 
-            # 如果需要插值
-            original_steps = self.steps
-            if self.interpolate_to is not None:
-                # 保存原始steps
-                original_data = df['mul'].values
-                # 分块插值
-                interpolated_data = []
+        # 插值
+        original_steps = self.steps
+        if self.interpolate_to is not None:
+            # 原始steps
+            original_data = df['mul'].values
+            interpolated_data = []
 
-                for i in range(0, len(original_data), original_steps):
-                    chunk = original_data[i:i + original_steps]
-                    # 只有当数据块长度等于原始steps时才进行插值
-                    if len(chunk) == original_steps:
-                        interpolated_chunk = self.interpolate_data(chunk, original_steps, self.interpolate_to)
-                        interpolated_data.extend(interpolated_chunk)
+            # 分块插值
+            for i in range(0, len(original_data), original_steps):
+                chunk = original_data[i:i + original_steps]
+                # 插值需要chunk长度等于原始steps
+                if len(chunk) == original_steps:
+                    interpolated_chunk = self.interpolate_data(chunk, original_steps, self.interpolate_to)
+                    interpolated_data.extend(interpolated_chunk)
 
-                # 更新df和steps
-                df = pd.DataFrame({'mul': interpolated_data})
-                self.steps = self.interpolate_to
-        except:
-            print(r'put load shapes files under ./loadshape')
+            # 更新df和steps
+            df = pd.DataFrame({'mul': interpolated_data})
+            self.steps = self.interpolate_to
 
-        # 计算总的episodes数
+        # 计算生成的数据可分隔为多少个episodes
         episodes = len(df) // (self.steps * len(self.LOAD_NAMES))
 
         # 检查loadprofile文件夹是否存在
@@ -360,7 +308,7 @@ class LoadProfile:
         """
         选择特定的负载曲线文件，并在主负载文件中添加重定向和模式设置.(修改了zfill参数3->4)
         Args:
-            idx:
+            idx (int): 负载曲线编号
         Returns:
             负载曲线文件的路径
         """
@@ -376,15 +324,16 @@ class LoadProfile:
 
     def get_loadprofile(self, idx):
         """
-        修改了zfill参数3->4
+        获取指定编号目录的所有负载曲线数据.(修改了zfill参数3->4)
         Args:
             idx: loadrrofile的编号，整数
         Returns:
-            all_loads: 负载曲线数据的DataFrame
+            all_loads: 包含所有(修饰负载而非时间)负载的曲线数据的DataFrame
         """
         folder_path = os.path.join(self.loadshape_path, str(idx).zfill(4))
         csv_paths = os.listdir(folder_path)
         temp_loads = []
+        # 遍历编号目录下的所有csv文件
         for csv in csv_paths:
             csv_file = os.path.join(folder_path, csv)
             load = pd.read_csv(csv_file, header=None, names=[csv.split('.')[0]])
